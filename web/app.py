@@ -15,27 +15,6 @@ from src.processing import (process_pattern, combine_patterns, compute_coverage,
                              get_component_grid, get_cut, detect_boresight)
 
 
-def _rot_status_str(R: np.ndarray) -> str:
-    """Format a 3×3 SO(3) matrix as a human-readable rotation status string."""
-    if np.allclose(R, np.eye(3), atol=1e-9):
-        return 'No rotation applied (identity)'
-    cos_ang = np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)
-    angle = float(np.degrees(np.arccos(cos_ang)))
-    # Rodrigues axis from skew-symmetric part
-    sin_ang = np.sqrt(max(0.0, 1.0 - cos_ang ** 2))
-    if sin_ang > 1e-6:
-        ax = np.array([R[2, 1] - R[1, 2],
-                       R[0, 2] - R[2, 0],
-                       R[1, 0] - R[0, 1]]) / (2.0 * sin_ang)
-        return (f'Total rotation: {angle:.1f}°  '
-                f'axis [{ax[0]:.2f}, {ax[1]:.2f}, {ax[2]:.2f}]')
-    # 180° case — axis from largest diagonal
-    diag = np.diag(R)
-    idx = int(np.argmax(diag))
-    ax = np.zeros(3); ax[idx] = 1.0
-    return f'Total rotation: 180.0°  axis [{ax[0]:.0f}, {ax[1]:.0f}, {ax[2]:.0f}]'
-
-
 from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
                            plot_3d_pattern, plot_3d_sphere,
                            plot_circular, plot_filled_polar,
@@ -395,9 +374,6 @@ def _build_single_tab():
                         src_ori.set_value('Custom...')
                         dir_str = f'θ={R.max_gain_dir[0]:.1f}° φ={R.max_gain_dir[1]:.1f}°'
                         lbl_peak.set_text(f'Peak: {R.max_gain_dB:.2f} dBi  @  {dir_str}')
-                        if 'lbl_rot_info' in plot_refs:
-                            plot_refs['lbl_rot_info'].set_text(
-                                _rot_status_str(_state['rot_matrix']))
                         _update_single_plot(
                             plot_refs,
                             plot_refs['comp_dd'], plot_refs['plot_dd'],
@@ -429,9 +405,6 @@ def _build_single_tab():
                         coords = _ORI_PRESETS.get(label, (0.0, 0.0))
                         src_th.set_value(coords[0])
                         src_ph.set_value(coords[1])
-                    if 'lbl_rot_info' in plot_refs:
-                        plot_refs['lbl_rot_info'].set_text(
-                            _rot_status_str(np.eye(3)))
                     _notify('Rotation reset to original.')
 
                 with ui.row().classes('w-full gap-1'):
@@ -441,11 +414,6 @@ def _build_single_tab():
                         'flat color=orange').classes('flex-1')
                     ui.button('Reset',  on_click=_reset_rot, icon='undo').props(
                         'flat color=grey').classes('flex-1')
-
-                lbl_rot_info = ui.label(_rot_status_str(np.eye(3))).classes(
-                    'text-caption text-grey-7 w-full').style(
-                    'font-family:monospace; font-size:0.72rem; padding-top:2px')
-                plot_refs['lbl_rot_info'] = lbl_rot_info
 
             with _card('Export'):
                 def _export_csv():
@@ -503,6 +471,7 @@ def _build_single_tab():
                 cb_hpbw.set_visibility(False)
 
                 def _refresh_plot():
+                    if plot_refs.get('ar_updating'): return
                     _update_controls_visibility()
                     if _state['R_single'] is None: return
                     _update_single_plot(
@@ -520,6 +489,7 @@ def _build_single_tab():
                 cb_peak=cb_peak, cb_hpbw=cb_hpbw,
                 fmt_dd=fmt_dd,
                 pt=pt_inp, loss=loss_inp, rw=rw_inp, dist=dist_inp,
+                ar_updating=False,
             ))
 
             for ctrl in [comp_dd, plot_dd, cut_type, cut_val, cut_comp, cmin_inp, cmax_inp]:
@@ -548,6 +518,12 @@ def _build_single_tab():
                         columns=_IN_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
                         'height:240px').classes('w-full')
+                    tbl_in.add_slot('top-right', '''
+                        <q-input dense outlined v-model="props.filter"
+                            placeholder="Filter rows…" clearable style="max-width:200px">
+                            <template v-slot:prepend><q-icon name="search"/></template>
+                        </q-input>
+                    ''')
 
                 with ui.tab_panel(dt_data):
                     _DATA_COLS = [
@@ -565,6 +541,12 @@ def _build_single_tab():
                         columns=_DATA_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
                         'height:240px').classes('w-full')
+                    tbl_data.add_slot('top-right', '''
+                        <q-input dense outlined v-model="props.filter"
+                            placeholder="Filter rows…" clearable style="max-width:200px">
+                            <template v-slot:prepend><q-icon name="search"/></template>
+                        </q-input>
+                    ''')
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
             tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
@@ -614,7 +596,7 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             R = rotate_processed_pattern(R, rot)
         _state['R_single'] = R
 
-        # Auto-detect boresight and update source spinners; reset tracker label
+        # Auto-detect boresight and update source spinners
         if 'src_ori' in plot_refs:
             d = detect_boresight(R)
             label = _BORESIGHT_TO_ORI.get(d, '+Z (Overhead)')
@@ -622,9 +604,6 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             plot_refs['src_ori'].set_value(label)
             plot_refs['src_th'].set_value(coords[0])
             plot_refs['src_ph'].set_value(coords[1])
-        if 'lbl_rot_info' in plot_refs:
-            plot_refs['lbl_rot_info'].set_text(
-                _rot_status_str(_state['rot_matrix']))
 
         cmin, cmax = auto_clim(R.max_gain_dB)
         plot_refs['cmin_inp'].set_value(cmin)
@@ -702,14 +681,28 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
     R = _state['R_single']
     if R is None: return
     try:
-        # Multi-select value is a list; fall back to all 3 if empty
         cc = cut_comp.value if cut_comp is not None else ['Total Gain', 'RHCP Gain', 'LHCP Gain']
         if isinstance(cc, list) and len(cc) == 0:
             cc = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
+
+        # AR: always use symmetric auto-limits; update UI fields (guard prevents re-entry)
+        if comp_dd.value == 'Axial Ratio':
+            raw_max = float(np.nanmax(R.AR_dB))
+            cmax_ar = float(np.ceil(max(raw_max, 1.0) / 5) * 5)
+            cmin_ar = -cmax_ar
+            plot_refs['ar_updating'] = True
+            cmin_inp.set_value(cmin_ar)
+            cmax_inp.set_value(cmax_ar)
+            plot_refs['ar_updating'] = False
+            cmin, cmax = cmin_ar, cmax_ar
+        else:
+            cmin = float(cmin_inp.value)
+            cmax = float(cmax_inp.value)
+
         fig = _render_plot(
             R, plot_type=plot_dd.value, component=comp_dd.value,
             cut_type=cut_type.value, cut_value=float(cut_val.value),
-            cmin=float(cmin_inp.value), cmax=float(cmax_inp.value),
+            cmin=cmin, cmax=cmax,
             show_peak=cb_peak.value, show_hpbw=cb_hpbw.value,
             cut_component=cc,
         )
@@ -748,6 +741,26 @@ def _build_batch_tab():
                     b_rw   = ui.number('Rw (dB)',         value=0.0).props('dense outlined')
                     b_dist = ui.number('Distance (m)',    value=1.0).props('dense outlined')
 
+            with _card('Batch Coverage'):
+                cb_sph = ui.checkbox('Spherical Coverage', value=True).props('color=teal')
+                with ui.row().classes('w-full items-center gap-2'):
+                    cb_con = ui.checkbox('Conical Coverage', value=False).props('color=orange')
+                    cone_deg_inp = ui.number(
+                        'Cone half-angle (°)', value=45.0,
+                        min=1, max=89).props('dense outlined').style('width:160px')
+                cb_con.on('update:model-value',
+                          lambda e: cone_deg_inp.set_visibility(bool(e.args)))
+                cone_deg_inp.set_visibility(False)
+                ui.separator().classes('my-1')
+                ui.label('Thresholds').classes('text-caption text-grey-6')
+                with ui.row().classes('w-full gap-1'):
+                    cov_thr_min  = ui.number('Min (dB)',  value=-40.0,
+                                             format='%.0f').props('dense outlined').style('width:74px')
+                    cov_thr_max  = ui.number('Max (dB)',  value=10.0,
+                                             format='%.0f').props('dense outlined').style('width:74px')
+                    cov_thr_step = ui.number('Step (dB)', value=5.0,
+                                             format='%.0f').props('dense outlined').style('width:74px')
+
             async def _run_batch():
                 entries = _state['batch_entries']
                 if not entries: _notify_err('Upload files first.'); return
@@ -764,9 +777,51 @@ def _build_batch_tab():
                             ent['ok'] = True; ok += 1
                         except Exception as ex:
                             ent['ok'] = False; ent['err'] = str(ex)
+
+                # Coverage computation
+                do_sph = bool(cb_sph.value)
+                do_con = bool(cb_con.value)
+                if do_sph or do_con:
+                    step  = max(float(cov_thr_step.value), 0.5)
+                    thresholds = np.arange(
+                        float(cov_thr_min.value),
+                        float(cov_thr_max.value) + step * 0.5,
+                        step)
+                    cone_ha = float(cone_deg_inp.value)
+                    cov_ok = 0
+                    for ent in entries:
+                        if not ent.get('ok') or not ent.get('R'):
+                            continue
+                        R_e = ent['R']
+                        ent['cov_thr'] = thresholds
+                        try:
+                            if do_sph:
+                                ent['cov_sph'] = await loop.run_in_executor(
+                                    None, lambda r=R_e, t=thresholds:
+                                    compute_coverage(r, t, mode='spherical'))
+                            if do_con:
+                                bdir = detect_boresight(R_e)
+                                ori_lbl = _BORESIGHT_TO_ORI.get(bdir, '+Z (Overhead)')
+                                ax_th, ax_ph = _ORI_PRESETS.get(ori_lbl, (0.0, 0.0))
+                                ent['cov_con'] = await loop.run_in_executor(
+                                    None, lambda r=R_e, t=thresholds,
+                                    th=ax_th, ph=ax_ph, c=cone_ha:
+                                    compute_coverage(r, t, mode='conical',
+                                                     cone_axis_th=th,
+                                                     cone_axis_ph=ph,
+                                                     cone_half_angle=c))
+                            cov_ok += 1
+                        except Exception as ex:
+                            traceback.print_exc()
+                    if cov_ok:
+                        _notify(f'Coverage computed for {cov_ok} patterns.')
+
                 refs['refresh_list'](refs['file_list'])
                 refs['refresh_summary'](refs['summary_plot'])
                 _notify(f'Batch complete: {ok}/{len(entries)} OK')
+                # Auto-export ZIP
+                if ok > 0:
+                    _export_batch_csv()
 
             def _export_batch_csv():
                 import zipfile, io
@@ -786,6 +841,26 @@ def _build_batch_tab():
                                 f'{R.PLF_dB[i]:.4f},{R.EIRP_dBW[i]:.4f}')
                         safe_name = e['name'].rsplit('.', 1)[0] + '_processed.csv'
                         zf.writestr(safe_name, '\n'.join(rows))
+
+                    # Coverage summary CSV (if any coverage was computed)
+                    cov_entries = [e for e in entries if 'cov_thr' in e]
+                    if cov_entries:
+                        thr = cov_entries[0]['cov_thr']
+                        has_sph = any('cov_sph' in e for e in cov_entries)
+                        has_con = any('cov_con' in e for e in cov_entries)
+                        hdr_sph = [f'sph_{t:.0f}dB_%' for t in thr] if has_sph else []
+                        hdr_con = [f'con_{t:.0f}dB_%' for t in thr] if has_con else []
+                        cov_rows = [','.join(['pattern', 'peak_dBi'] + hdr_sph + hdr_con)]
+                        for e in cov_entries:
+                            sph_v = ([f'{v*100:.2f}' for v in e['cov_sph']]
+                                     if 'cov_sph' in e else ['']*len(hdr_sph))
+                            con_v = ([f'{v*100:.2f}' for v in e['cov_con']]
+                                     if 'cov_con' in e else ['']*len(hdr_con))
+                            cov_rows.append(
+                                f"{e['name']},{e['R'].max_gain_dB:.3f},"
+                                + ','.join(sph_v + con_v))
+                        zf.writestr('coverage_summary.csv', '\n'.join(cov_rows))
+
                 buf.seek(0)
                 ui.download(buf.read(), 'batch_patterns.zip')
                 _notify(f'Downloading {len(entries)} pattern CSV(s) as zip')
