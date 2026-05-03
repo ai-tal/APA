@@ -530,14 +530,24 @@ def _build_single_tab():
                 def _update_controls_visibility():
                     is_cut    = plot_dd.value in CUT_PLOT_TYPES
                     is_1d_cut = plot_dd.value in ('Polar Cut', 'Rect Cut')
-                    is_custom = plane_mode.value == 'Custom'
                     plane_mode.set_visibility(is_cut)
-                    lbl_plane_info.set_visibility(is_cut and not is_custom)
-                    cut_type.set_visibility(is_cut and is_custom)
-                    cut_val.set_visibility(is_cut and is_custom)
+                    lbl_plane_info.set_visibility(False)
+                    cut_type.set_visibility(is_cut)
+                    cut_val.set_visibility(is_cut)
                     cut_comp.set_visibility(is_1d_cut)
                     cb_hpbw.set_visibility(is_1d_cut)
                     btn_export_cut.set_visibility(is_cut)
+                    # Preset cut_type / cut_val to match the auto-detected E/H plane
+                    if is_cut and plane_mode.value != 'Custom':
+                        R = _state.get('R_single')
+                        if R:
+                            eff_t, eff_v = _eff_cut_params(
+                                R, plane_mode.value,
+                                cut_type.value, float(cut_val.value or 0))
+                            if cut_type.value != eff_t:
+                                cut_type.set_value(eff_t)
+                            if abs(float(cut_val.value or 0) - eff_v) > 0.05:
+                                cut_val.set_value(round(eff_v, 1))
 
                 # Initial visibility (Contour = no cut controls)
                 plane_mode.set_visibility(False)
@@ -573,10 +583,31 @@ def _build_single_tab():
                 last_comp=None,
             ))
 
-            for ctrl in [comp_dd, plot_dd, plane_mode, cut_type, cut_val, cut_comp, cmin_inp, cmax_inp]:
+            for ctrl in [comp_dd, plot_dd, plane_mode, cut_comp, cmin_inp, cmax_inp]:
                 ctrl.on('update:model-value', lambda _: _refresh_plot())
             cb_peak.on('update:model-value', lambda _: _refresh_plot())
             cb_hpbw.on('update:model-value', lambda _: _refresh_plot())
+
+            def _on_cut_control_change():
+                """cut_type / cut_val changed — auto-switch to Custom if the new
+                values differ from what the current E/H plane mode would produce.
+                Programmatic presets (from _update_controls_visibility) produce
+                values that match _eff_cut_params, so they will NOT trigger the
+                Custom switch."""
+                R = _state.get('R_single')
+                pm = plane_mode.value
+                if R and pm != 'Custom':
+                    eff_t, eff_v = _eff_cut_params(
+                        R, pm, cut_type.value, float(cut_val.value or 0))
+                    same = (cut_type.value == eff_t and
+                            abs(float(cut_val.value or 0) - eff_v) < 0.15)
+                    if not same:
+                        plane_mode.set_value('Custom')
+                        return   # plane_mode change triggers _refresh_plot
+                _refresh_plot()
+
+            cut_type.on('update:model-value', lambda _: _on_cut_control_change())
+            cut_val.on('update:model-value',  lambda _: _on_cut_control_change())
 
             # ── Data tables (2 tabs — metrics are in the left panel) ──────────
             with ui.tabs().props('dense indicator-color=blue').classes('w-full') as dtabs:

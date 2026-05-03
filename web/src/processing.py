@@ -157,7 +157,7 @@ def process_pattern(P: PatternData, params: dict = None) -> ProcessedPattern:
         ['Grid', f'{len(np.unique(theta))} × {len(np.unique(phi))} pts'],
     ]
 
-    return ProcessedPattern(
+    R = ProcessedPattern(
         theta=theta, phi=phi,
         G_total_dB=G_total_dB, G_RHCP_dB=G_RHCP_dB, G_LHCP_dB=G_LHCP_dB,
         AR_dB=AR_dB, PLF_dB=PLF_dB, EIRP_dBW=EIRP_dBW, PFD_Wm2=PFD_Wm2,
@@ -172,6 +172,64 @@ def process_pattern(P: PatternData, params: dict = None) -> ProcessedPattern:
         is_regular=is_regular,
         table_rows=table_rows, table_cols=table_cols,
     )
+    # ---- Refine HPBW using exact grid cuts (same path as the plot overlay) ----
+    _refine_hpbw(R)
+    return R
+
+
+def _refine_hpbw(R: ProcessedPattern) -> None:
+    """Recompute R.hpbw_e / R.hpbw_h using the exact grid cuts.
+
+    Called AFTER the ProcessedPattern is fully built (grid cache ready) so
+    detect_boresight() and get_cut() are both available.  The same cut path
+    used by _cut_full360() in plotting.py is replicated here so the metrics
+    panel value and the HPBW overlay on the cut plots are always identical.
+    Updates the pattern and its summary table in-place.
+    """
+    try:
+        boresight = detect_boresight(R)
+        is_th_dom = getattr(R, 'eth_at_peak', 1.0) >= getattr(R, 'eph_at_peak', 0.0)
+        _, pp = R.max_gain_dir
+
+        if boresight == '+X':
+            meridian, perp = ('Theta Cut', 0.0),   ('Phi Cut', 90.0)
+        elif boresight == '-X':
+            meridian, perp = ('Theta Cut', 180.0), ('Phi Cut', 90.0)
+        elif boresight == '+Y':
+            meridian, perp = ('Theta Cut', 90.0),  ('Phi Cut', 90.0)
+        elif boresight == '-Y':
+            meridian, perp = ('Theta Cut', 270.0), ('Phi Cut', 90.0)
+        else:
+            phi_snap = float(round((pp % 180) / 90) * 90)
+            meridian = ('Theta Cut', phi_snap % 360)
+            perp     = ('Theta Cut', (phi_snap + 90) % 360)
+
+        e_cut = meridian if is_th_dom else perp
+        h_cut = perp     if is_th_dom else meridian
+
+        def _hpbw_exact(cut_type, cut_value):
+            """HPBW from an exact grid cut — mirrors _cut_full360 stitching."""
+            if cut_type == 'Theta Cut':
+                a_f, g_f, _, _ = get_cut(R, cut_type, cut_value)
+                a_m, g_m, _, _ = get_cut(R, cut_type, (cut_value + 180.0) % 360.0)
+                a_s = 360.0 - a_m[::-1][1:]
+                g_s = g_m[::-1][1:]
+                angles = np.concatenate([a_f, a_s])
+                gains  = np.concatenate([g_f, g_s])
+            else:
+                angles, gains, _, _ = get_cut(R, cut_type, cut_value)
+            return _hpbw_peak_centered(angles, gains)
+
+        R.hpbw_e = _hpbw_exact(*e_cut)
+        R.hpbw_h = _hpbw_exact(*h_cut)
+
+        for row in R.table_rows:
+            if row[0] == 'HPBW (E-plane)':
+                row[1] = f'{R.hpbw_e:.1f}°' if R.hpbw_e else 'N/A'
+            elif row[0] == 'HPBW (H-plane)':
+                row[1] = f'{R.hpbw_h:.1f}°' if R.hpbw_h else 'N/A'
+    except Exception:
+        pass
 
 
 def get_component_grid(R: ProcessedPattern, component: str) -> Tuple[np.ndarray, str]:
