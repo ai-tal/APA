@@ -129,9 +129,10 @@ def process_pattern(P: PatternData, params: dict = None) -> ProcessedPattern:
         elif np.mean(G_LHCP_dB) > np.mean(G_RHCP_dB) + 1.0:
             dominant_pol = 'LHCP'
 
-    # ---- HPBW (E & H planes through peak) ----
+    # ---- HPBW (E & H planes — boresight-axis algorithm) ----
     hpbw_e, hpbw_h, fbr_dB = _compute_hpbw_fbr(theta, phi, G_total_dB,
-                                                  max_gain_dir[0], max_gain_dir[1])
+                                                  max_gain_dir[0], max_gain_dir[1],
+                                                  eth_at_peak, eph_at_peak)
 
     # ---- Directivity ----
     directivity_dBi = _compute_directivity(theta, phi, G_total_dB)
@@ -219,9 +220,48 @@ def get_cut(R: ProcessedPattern, cut_type: str, cut_value: float):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _compute_hpbw_fbr(theta, phi, G_dB, peak_theta, peak_phi):
-    """Compute HPBW in E-plane (phi=peak_phi) and H-plane (phi=peak_phi+90),
-    and F/B ratio."""
+def _detect_boresight_raw(theta, phi, G_dB) -> str:
+    """Detect cardinal boresight axis (+X/-X/+Y/-Y/+Z/-Z) from flat arrays.
+
+    Mirrors detect_boresight() but works on the raw 1-D theta/phi/G arrays
+    produced during process_pattern — no ProcessedPattern or grid cache needed.
+    """
+    cos_thr = np.cos(np.deg2rad(45.0))
+    th_r = np.deg2rad(theta)
+    ph_r = np.deg2rad(phi)
+    sx = np.sin(th_r) * np.cos(ph_r)
+    sy = np.sin(th_r) * np.sin(ph_r)
+    sz = np.cos(th_r)
+    dA   = np.clip(np.sin(th_r), 0, None)
+    Gpow = 10.0 ** (np.clip(G_dB, -60, None) / 10.0)
+
+    cand_dirs = ['+X', '-X', '+Y', '-Y', '+Z', '-Z']
+    cand_vecs = np.array([[ 1, 0, 0], [-1, 0, 0],
+                           [ 0, 1, 0], [ 0,-1, 0],
+                           [ 0, 0, 1], [ 0, 0,-1]], dtype=float)
+    best_score, best_dir = -np.inf, '+Z'
+    for d, v in zip(cand_dirs, cand_vecs):
+        cos_a = v[0]*sx + v[1]*sy + v[2]*sz
+        mask  = cos_a >= cos_thr
+        w_sum = float(np.sum(dA[mask]))
+        if w_sum > 0:
+            score = float(np.sum(Gpow[mask] * dA[mask])) / w_sum
+            if score > best_score:
+                best_score, best_dir = score, d
+    return best_dir
+
+
+def _compute_hpbw_fbr(theta, phi, G_dB, peak_theta, peak_phi,
+                       eth_at_peak: float = 1.0, eph_at_peak: float = 0.0):
+    """Compute HPBW in boresight-axis E/H planes and F/B ratio.
+
+    Uses the same cardinal-plane algorithm as _eff_cut_params (app.py) /
+    MATLAB ehPlanes() so the metrics-panel HPBW values always match the
+    E/H-plane cut plots:
+      1. Detect cardinal boresight axis from flat arrays (no grid needed).
+      2. At-peak |Eθ|/|Eφ| → which principal plane is E vs H.
+      3. HPBW extracted from the correct cut (Theta Cut or Phi Cut).
+    """
     half_power = G_dB.max() - 3.0
     eps = 2.0
 
@@ -232,36 +272,56 @@ def _compute_hpbw_fbr(theta, phi, G_dB, peak_theta, peak_phi):
         crossings = np.where(np.diff(above.astype(int)) != 0)[0]
         if len(crossings) < 2:
             return None
-        a1 = float(angles[crossings[0]])
-        a2 = float(angles[crossings[-1]])
-        return abs(a2 - a1)
+        return abs(float(angles[crossings[-1]]) - float(angles[crossings[0]]))
 
-    # E-plane: phi cut at phi=peak_phi, vary theta
-    mask_e = np.abs(phi - peak_phi) < eps
-    if mask_e.sum() > 2:
-        ord_e = np.argsort(theta[mask_e])
-        hpbw_e = _hpbw_from_cut(theta[mask_e][ord_e], G_dB[mask_e][ord_e])
-    else:
-        hpbw_e = None
+    def _hpbw_theta_cut(phi_val):
+        """Theta sweep at fixed phi = phi_val."""
+        mask = np.abs(phi - phi_val) < eps
+        if mask.sum() < 3:
+            return None
+        ord_ = np.argsort(theta[mask])
+        return _hpbw_from_cut(theta[mask][ord_], G_dB[mask][ord_])
 
-    # H-plane: phi+90
-    h_phi = (peak_phi + 90) % 360
-    mask_h = np.abs(phi - h_phi) < eps
-    if mask_h.sum() > 2:
-        ord_h = np.argsort(theta[mask_h])
-        hpbw_h = _hpbw_from_cut(theta[mask_h][ord_h], G_dB[mask_h][ord_h])
-    else:
-        hpbw_h = None
+    def _hpbw_phi_cut(theta_val):
+        """Phi sweep at fixed theta = theta_val."""
+        mask = np.abs(theta - theta_val) < eps
+        if mask.sum() < 3:
+            return None
+        ord_ = np.argsort(phi[mask])
+        return _hpbw_from_cut(phi[mask][ord_], G_dB[mask][ord_])
 
-    # F/B ratio
+    # ── 1. Cardinal boresight (raw arrays, no grid) ───────────────────────
+    boresight  = _detect_boresight_raw(theta, phi, G_dB)
+    is_th_dom  = eth_at_peak >= eph_at_peak
+
+    # ── 2. Principal-plane pair (mirrors _eff_cut_params logic) ──────────
+    #   cut type 'T' = Theta Cut (fix phi, sweep theta)
+    #   cut type 'P' = Phi Cut   (fix theta, sweep phi)
+    if boresight == '+X':
+        meridian   = ('T', 0.0);   perp_plane = ('P', 90.0)
+    elif boresight == '-X':
+        meridian   = ('T', 180.0); perp_plane = ('P', 90.0)
+    elif boresight == '+Y':
+        meridian   = ('T', 90.0);  perp_plane = ('P', 90.0)
+    elif boresight == '-Y':
+        meridian   = ('T', 270.0); perp_plane = ('P', 90.0)
+    else:  # +Z or -Z — snap peak phi to nearest 0° or 90°
+        phi_snap   = float(round((peak_phi % 180) / 90) * 90)
+        meridian   = ('T', phi_snap % 360)
+        perp_plane = ('T', (phi_snap + 90) % 360)
+
+    e_plane = meridian   if is_th_dom else perp_plane
+    h_plane = perp_plane if is_th_dom else meridian
+
+    # ── 3. HPBW from each plane ───────────────────────────────────────────
+    hpbw_e = _hpbw_theta_cut(e_plane[1]) if e_plane[0] == 'T' else _hpbw_phi_cut(e_plane[1])
+    hpbw_h = _hpbw_theta_cut(h_plane[1]) if h_plane[0] == 'T' else _hpbw_phi_cut(h_plane[1])
+
+    # ── F/B ratio ─────────────────────────────────────────────────────────
     back_theta = 180.0 - peak_theta
-    back_phi = (peak_phi + 180) % 360
-    mask_back = (np.abs(theta - back_theta) < eps) & (np.abs(phi - back_phi) < eps)
-    if mask_back.sum() > 0:
-        G_back = float(G_dB[mask_back].max())
-        fbr_dB = G_dB.max() - G_back
-    else:
-        fbr_dB = None
+    back_phi   = (peak_phi + 180) % 360
+    mask_back  = (np.abs(theta - back_theta) < eps) & (np.abs(phi - back_phi) < eps)
+    fbr_dB = float(G_dB.max() - G_dB[mask_back].max()) if mask_back.sum() > 0 else None
 
     return hpbw_e, hpbw_h, fbr_dB
 
