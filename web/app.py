@@ -309,9 +309,9 @@ def _build_single_tab():
 
                 with ui.row().classes('w-full gap-1'):
                     ui.button('→ Coverage', on_click=_send_to_coverage, icon='radar').props(
-                        'flat color=green size=sm').classes('flex-1')
+                        'flat color=green size=sm').classes('flex-1').style('height:34px')
                     ui.button('→ Combine',  on_click=_send_to_combine,  icon='merge').props(
-                        'flat color=purple size=sm').classes('flex-1')
+                        'flat color=purple size=sm').classes('flex-1').style('height:34px')
 
             with _card('Rotation (cumulative SO(3))'):
                 # Source orientation preset dropdown
@@ -490,6 +490,7 @@ def _build_single_tab():
                 fmt_dd=fmt_dd,
                 pt=pt_inp, loss=loss_inp, rw=rw_inp, dist=dist_inp,
                 ar_updating=False,
+                last_comp=None,
             ))
 
             for ctrl in [comp_dd, plot_dd, cut_type, cut_val, cut_comp, cmin_inp, cmax_inp]:
@@ -518,12 +519,24 @@ def _build_single_tab():
                         columns=_IN_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
                         'height:240px').classes('w-full')
-                    tbl_in.add_slot('top-right', '''
-                        <q-input dense outlined v-model="props.filter"
-                            placeholder="Filter rows…" clearable style="max-width:200px">
-                            <template v-slot:prepend><q-icon name="search"/></template>
-                        </q-input>
-                    ''')
+                    plot_refs['_all_in_rows'] = []
+                    def _filter_in(val=''):
+                        v = str(val or '').strip().lower()
+                        src = plot_refs['_all_in_rows']
+                        tbl_in.rows = (
+                            [r for r in src
+                             if any(v in str(x).lower() for x in r.values())][:_MAX_TBL]
+                            if v else src[:_MAX_TBL])
+                        tbl_in.update()
+                    with tbl_in.add_slot('top'):
+                        with ui.row().classes('w-full items-center gap-1').style(
+                                'padding:2px 6px'):
+                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
+                            ui.input(placeholder='Filter rows…').props(
+                                'dense borderless clearable'
+                            ).classes('flex-1').on(
+                                'update:model-value',
+                                lambda e: _filter_in(e.args))
 
                 with ui.tab_panel(dt_data):
                     _DATA_COLS = [
@@ -541,12 +554,24 @@ def _build_single_tab():
                         columns=_DATA_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
                         'height:240px').classes('w-full')
-                    tbl_data.add_slot('top-right', '''
-                        <q-input dense outlined v-model="props.filter"
-                            placeholder="Filter rows…" clearable style="max-width:200px">
-                            <template v-slot:prepend><q-icon name="search"/></template>
-                        </q-input>
-                    ''')
+                    plot_refs['_all_data_rows'] = []
+                    def _filter_data(val=''):
+                        v = str(val or '').strip().lower()
+                        src = plot_refs['_all_data_rows']
+                        tbl_data.rows = (
+                            [r for r in src
+                             if any(v in str(x).lower() for x in r.values())][:_MAX_TBL]
+                            if v else src[:_MAX_TBL])
+                        tbl_data.update()
+                    with tbl_data.add_slot('top'):
+                        with ui.row().classes('w-full items-center gap-1').style(
+                                'padding:2px 6px'):
+                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
+                            ui.input(placeholder='Filter rows…').props(
+                                'dense borderless clearable'
+                            ).classes('flex-1').on(
+                                'update:model-value',
+                                lambda e: _filter_data(e.args))
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
             tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
@@ -620,20 +645,21 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
 
         n   = len(P.theta)
         _MAX_TBL = 2000  # cap rows to avoid browser crash on large patterns
-        idx = np.arange(min(n, _MAX_TBL))
 
         # ── Input data table ───────────────────────────────────────────────
         Gth = 20 * np.log10(np.abs(P.Eth) + 1e-30)
         Gph = 20 * np.log10(np.abs(P.Eph) + 1e-30)
         pth = np.angle(P.Eth, deg=True)
         pph = np.angle(P.Eph, deg=True)
-        tbl_in.rows = [
+        all_in = [
             dict(row_num=str(i + 1),
                  theta=f'{P.theta[i]:.2f}', phi=f'{P.phi[i]:.2f}',
                  gth=f'{Gth[i]:.3f}', gph=f'{Gph[i]:.3f}',
                  pth=f'{pth[i]:.2f}', pph=f'{pph[i]:.2f}')
-            for i in idx
+            for i in range(n)
         ]
+        plot_refs['_all_in_rows'] = all_in
+        tbl_in.rows = all_in[:_MAX_TBL]
         if n > _MAX_TBL:
             tbl_in.rows.append(dict(
                 row_num='…', theta=f'…  ({n} total, showing {_MAX_TBL})',
@@ -641,7 +667,7 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         tbl_in.update()
 
         # ── Output data table ──────────────────────────────────────────────
-        tbl_data.rows = [
+        all_data = [
             dict(row_num=str(i + 1),
                  theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
                  gtot=f'{R.G_total_dB[i]:.3f}',
@@ -650,8 +676,10 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
                  ar=f'{R.AR_dB[i]:.3f}',
                  plf=f'{R.PLF_dB[i]:.3f}',
                  eirp=f'{R.EIRP_dBW[i]:.3f}')
-            for i in idx
+            for i in range(n)
         ]
+        plot_refs['_all_data_rows'] = all_data
+        tbl_data.rows = all_data[:_MAX_TBL]
         if n > _MAX_TBL:
             tbl_data.rows.append(dict(
                 row_num='…', theta=f'…  ({n} total, showing {_MAX_TBL})',
@@ -685,19 +713,23 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
         if isinstance(cc, list) and len(cc) == 0:
             cc = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
 
-        # AR: always use symmetric auto-limits; update UI fields (guard prevents re-entry)
+        # AR: auto-set symmetric limits only when first switching TO Axial Ratio;
+        #     subsequent refreshes while already on AR use the user's current values.
         if comp_dd.value == 'Axial Ratio':
-            raw_max = float(np.nanmax(R.AR_dB))
-            cmax_ar = float(np.ceil(max(raw_max, 1.0) / 5) * 5)
-            cmin_ar = -cmax_ar
-            plot_refs['ar_updating'] = True
-            cmin_inp.set_value(cmin_ar)
-            cmax_inp.set_value(cmax_ar)
-            plot_refs['ar_updating'] = False
-            cmin, cmax = cmin_ar, cmax_ar
+            if plot_refs.get('last_comp') != 'Axial Ratio':
+                raw_max = float(np.nanmax(R.AR_dB))
+                cmax_ar = min(float(np.ceil(max(raw_max, 1.0) / 5) * 5), 30.0)
+                cmin_ar = -cmax_ar
+                plot_refs['ar_updating'] = True
+                cmin_inp.set_value(cmin_ar)
+                cmax_inp.set_value(cmax_ar)
+                plot_refs['ar_updating'] = False
+            cmin = float(cmin_inp.value)
+            cmax = float(cmax_inp.value)
         else:
             cmin = float(cmin_inp.value)
             cmax = float(cmax_inp.value)
+        plot_refs['last_comp'] = comp_dd.value
 
         fig = _render_plot(
             R, plot_type=plot_dd.value, component=comp_dd.value,
@@ -766,9 +798,13 @@ def _build_batch_tab():
                 if not entries: _notify_err('Upload files first.'); return
                 params = dict(Pt_dBW=b_pt.value, Loss_dB=b_loss.value,
                               Rw_dB=b_rw.value, dist_m=b_dist.value)
+                total = len(entries)
                 ok = 0
                 loop = asyncio.get_event_loop()
-                for ent in entries:
+                refs['lbl_status'].set_text(f'Processing 0 / {total}…')
+                for i, ent in enumerate(entries):
+                    refs['lbl_status'].set_text(f'Processing {i+1} / {total}…')
+                    await asyncio.sleep(0)
                     if ent.get('P') and not ent.get('R'):
                         try:
                             P, par = ent['P'], params
@@ -781,7 +817,8 @@ def _build_batch_tab():
                 # Coverage computation
                 do_sph = bool(cb_sph.value)
                 do_con = bool(cb_con.value)
-                if do_sph or do_con:
+                ok_entries = [e for e in entries if e.get('ok') and e.get('R')]
+                if (do_sph or do_con) and ok_entries:
                     step  = max(float(cov_thr_step.value), 0.5)
                     thresholds = np.arange(
                         float(cov_thr_min.value),
@@ -789,9 +826,10 @@ def _build_batch_tab():
                         step)
                     cone_ha = float(cone_deg_inp.value)
                     cov_ok = 0
-                    for ent in entries:
-                        if not ent.get('ok') or not ent.get('R'):
-                            continue
+                    for ci, ent in enumerate(ok_entries):
+                        refs['lbl_status'].set_text(
+                            f'Coverage {ci+1} / {len(ok_entries)}…')
+                        await asyncio.sleep(0)
                         R_e = ent['R']
                         ent['cov_thr'] = thresholds
                         try:
@@ -813,15 +851,11 @@ def _build_batch_tab():
                             cov_ok += 1
                         except Exception as ex:
                             traceback.print_exc()
-                    if cov_ok:
-                        _notify(f'Coverage computed for {cov_ok} patterns.')
 
                 refs['refresh_list'](refs['file_list'])
                 refs['refresh_summary'](refs['summary_plot'])
-                _notify(f'Batch complete: {ok}/{len(entries)} OK')
-                # Auto-export ZIP
-                if ok > 0:
-                    _export_batch_csv()
+                refs['lbl_status'].set_text(f'{ok}/{total} processed — click Export CSV to download')
+                _notify(f'Batch complete: {ok}/{total} OK')
 
             def _export_batch_csv():
                 import zipfile, io
@@ -842,24 +876,34 @@ def _build_batch_tab():
                         safe_name = e['name'].rsplit('.', 1)[0] + '_processed.csv'
                         zf.writestr(safe_name, '\n'.join(rows))
 
-                    # Coverage summary CSV (if any coverage was computed)
+                    # Coverage CSVs — one file per mode, rows=thresholds cols=patterns
                     cov_entries = [e for e in entries if 'cov_thr' in e]
                     if cov_entries:
                         thr = cov_entries[0]['cov_thr']
-                        has_sph = any('cov_sph' in e for e in cov_entries)
-                        has_con = any('cov_con' in e for e in cov_entries)
-                        hdr_sph = [f'sph_{t:.0f}dB_%' for t in thr] if has_sph else []
-                        hdr_con = [f'con_{t:.0f}dB_%' for t in thr] if has_con else []
-                        cov_rows = [','.join(['pattern', 'peak_dBi'] + hdr_sph + hdr_con)]
-                        for e in cov_entries:
-                            sph_v = ([f'{v*100:.2f}' for v in e['cov_sph']]
-                                     if 'cov_sph' in e else ['']*len(hdr_sph))
-                            con_v = ([f'{v*100:.2f}' for v in e['cov_con']]
-                                     if 'cov_con' in e else ['']*len(hdr_con))
-                            cov_rows.append(
-                                f"{e['name']},{e['R'].max_gain_dB:.3f},"
-                                + ','.join(sph_v + con_v))
-                        zf.writestr('coverage_summary.csv', '\n'.join(cov_rows))
+                        # Spherical coverage table
+                        sph_ents = [e for e in cov_entries if 'cov_sph' in e]
+                        if sph_ents:
+                            hdr = 'threshold_dBi,' + ','.join(
+                                e['name'] + '_sph_%' for e in sph_ents)
+                            sph_rows = [hdr]
+                            for i, t in enumerate(thr):
+                                vals = ','.join(
+                                    f'{e["cov_sph"][i]*100:.2f}' for e in sph_ents)
+                                sph_rows.append(f'{t:.2f},{vals}')
+                            zf.writestr('batch_spherical_coverage.csv',
+                                        '\n'.join(sph_rows))
+                        # Conical coverage table
+                        con_ents = [e for e in cov_entries if 'cov_con' in e]
+                        if con_ents:
+                            hdr = 'threshold_dBi,' + ','.join(
+                                e['name'] + '_con_%' for e in con_ents)
+                            con_rows = [hdr]
+                            for i, t in enumerate(thr):
+                                vals = ','.join(
+                                    f'{e["cov_con"][i]*100:.2f}' for e in con_ents)
+                                con_rows.append(f'{t:.2f},{vals}')
+                            zf.writestr('batch_conical_coverage.csv',
+                                        '\n'.join(con_rows))
 
                 buf.seek(0)
                 ui.download(buf.read(), 'batch_patterns.zip')
@@ -1060,13 +1104,13 @@ def _build_coverage_tab():
                     cone_th.on('update:model-value', _on_cone_spinner)
                     cone_ph.on('update:model-value', _on_cone_spinner)
 
-                    ui.button('Auto-detect cone axis', on_click=_auto_detect_cone,
-                              icon='my_location').props('flat color=teal size=sm').classes('w-full')
-
                 cone_col.set_visibility(False)
 
                 def _on_mode_change(_e=None):
-                    cone_col.set_visibility(cov_mode.value == 'Conical')
+                    is_conical = cov_mode.value == 'Conical'
+                    cone_col.set_visibility(is_conical)
+                    if is_conical:
+                        _auto_detect_cone()
                 cov_mode.on('update:model-value', _on_mode_change)
 
                 ui.separator()
@@ -1110,9 +1154,9 @@ def _build_coverage_tab():
 
             with ui.row().classes('w-full gap-1'):
                 ui.button('Compute',    on_click=_run_coverage, icon='radar').props(
-                    'flat color=green').classes('flex-1')
+                    'flat color=green size=sm').classes('flex-1').style('height:34px')
                 ui.button('Export CSV', on_click=_export_cov,   icon='download').props(
-                    'flat color=teal').classes('flex-1')
+                    'flat color=teal size=sm').classes('flex-1').style('height:34px')
 
         with ui.column().classes('flex-1').style('gap:6px'):
             with _card('Coverage CDF  (% solid angle ≥ threshold)'):
