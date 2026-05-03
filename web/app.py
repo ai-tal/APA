@@ -67,14 +67,13 @@ class _Card:
         self._title = title
 
     def __enter__(self):
-        self._card = ui.card().tight().style(
-            'background:#161b22; border:1px solid #30363d; border-radius:8px; '
-            'padding:10px; width:100%; gap:4px').classes('w-full')
+        self._card = ui.card().tight().props('bordered').classes('w-full').style(
+            'border-radius:8px; padding:10px; width:100%; gap:4px')
         self._card.__enter__()
         if self._title:
-            ui.label(self._title).style(
-                'font-size:0.75rem; font-weight:600; color:#8b949e; '
-                'text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px')
+            ui.label(self._title).classes('text-caption text-grey-6').style(
+                'font-weight:600; text-transform:uppercase; '
+                'letter-spacing:0.08em; margin-bottom:2px')
         return self._card
 
     def __exit__(self, *a):
@@ -130,189 +129,42 @@ _SUN_SVG = (
 
 @ui.page('/')
 def main_page():
-    ui.query('body').style(
-        'background:#0d1117; color:#e0e0e0; font-family:Roboto,sans-serif')
+    ui.query('body').style('font-family:Roboto,sans-serif')
 
-    # Light mode: JS MutationObserver rewrites every inline style that uses dark colours.
-    # CSS class selectors can't override inline styles reliably, so we patch the DOM directly.
-    ui.add_head_html('''<style>
-/* ═══════════════════════════════════════════════════════
-   LIGHT MODE — comprehensive Quasar + inline overrides
-   ═══════════════════════════════════════════════════════ */
-
-/* Page / layout */
-.body--light { background:#f5f7fa !important; color:#24292f !important; }
-.body--light .q-page { background:#f5f7fa !important; }
-.body--light .q-header { background:#ffffff !important; border-color:#d0d7de !important; }
-.body--light .q-footer { background:#ffffff !important; }
-.body--light .q-drawer { background:#ffffff !important; }
-
-/* Tabs */
-.body--light .q-tabs { background:#f0f2f5 !important; }
-.body--light .q-tab  { color:#57606a !important; }
-.body--light .q-tab--active { color:#0969da !important; }
-.body--light .q-tab__indicator { background:#0969da !important; }
-.body--light .q-tab-panels,
-.body--light .q-tab-panel { background:#f5f7fa !important; }
-.body--light .q-separator { background:#d0d7de !important; }
-
-/* ── Form fields (including those created with dark prop) ── */
-.body--light .q-field--dark .q-field__control,
-.body--light .q-field .q-field__control {
-  background:#ffffff !important;
-}
-.body--light .q-field--outlined.q-field--dark .q-field__control:before,
-.body--light .q-field--outlined .q-field__control:before {
-  border-color:#d0d7de !important;
-}
-.body--light .q-field--dark .q-field__native,
-.body--light .q-field--dark .q-field__input,
-.body--light .q-field--dark .q-field__label,
-.body--light .q-field--dark .q-field__marginal,
-.body--light .q-field--dark .q-field__bottom,
-.body--light .q-field__native,
-.body--light .q-field__input,
-.body--light .q-field__label { color:#24292f !important; }
-.body--light .q-field--dark .q-select__dropdown-icon,
-.body--light .q-select__dropdown-icon { color:#57606a !important; }
-.body--light .q-chip { background:#e0e5eb !important; color:#24292f !important; }
-.body--light .q-chip__icon { color:#57606a !important; }
-
-/* Select / dropdown menus */
-.body--light .q-menu { background:#ffffff !important; color:#24292f !important; border:1px solid #d0d7de; }
-.body--light .q-item  { color:#24292f !important; }
-.body--light .q-item:hover { background:#f0f2f5 !important; }
-.body--light .q-item__label { color:#24292f !important; }
-.body--light .q-item__label--caption { color:#57606a !important; }
-.body--light .q-list { background:transparent !important; }
-
-/* Tables */
-.body--light .q-table { color:#24292f !important; }
-.body--light .q-table__top,
-.body--light .q-table__bottom { background:#f0f2f5 !important; color:#24292f !important; }
-.body--light .q-table thead tr,
-.body--light .q-table thead th {
-  background:#e6eaef !important;
-  color:#24292f !important;
-  border-color:#d0d7de !important;
-}
-.body--light .q-table tbody tr:nth-child(odd)  td { background:#ffffff !important; }
-.body--light .q-table tbody tr:nth-child(even) td { background:#f5f7fa !important; }
-.body--light .q-table tbody td { color:#24292f !important; border-color:#d0d7de !important; }
-.body--light .q-table--dark { color:#24292f !important; }
-
-/* Scrollbar */
-.body--light ::-webkit-scrollbar-thumb { background:#adb5bd; border-radius:4px; }
-.body--light ::-webkit-scrollbar-track { background:#e9ecef; }
-
-/* Uploader */
-.body--light .q-uploader { background:#f0f2f5 !important; color:#24292f !important; }
-.body--light .q-uploader__header { background:#e2e8ef !important; }
-
-/* Checkbox & Radio */
-.body--light .q-checkbox__label,
-.body--light .q-radio__label   { color:#24292f !important; }
-.body--light .q-checkbox__bg   { border-color:#57606a !important; }
-
-/* Buttons */
-.body--light .q-btn--flat { color:#0969da !important; }
-
-/* Notifications */
-.body--light .q-notification { background:#ffffff !important; color:#24292f !important;
-  border:1px solid #d0d7de; box-shadow:0 2px 8px rgba(0,0,0,0.12); }
-
-/* Scroll area */
-.body--light .q-scrollarea { background:transparent !important; }
-</style>
-<script>
-/* ────────────────────────────────────────────────────────────────────────
-   Inline-style colour swap: dark ↔ light
-   NiceGUI bakes colours into style="" attributes which CSS !important
-   cannot reliably override, so we patch the DOM directly.
-   ──────────────────────────────────────────────────────────────────────── */
-window._apaLight = false;
-/* Dark → Light colour pairs */
-const _D2L = [
-  ['#161b22','#ffffff'], ['#16213e','#e8ecf0'], ['#0d1117','#f5f7fa'],
-  ['#1a1a2e','#f0f2f5'], ['#30363d','#d0d7de'], ['#8b949e','#57606a'],
-  ['#e0e0e0','#24292f'], ['#58a6ff','#0969da'], ['#4fc3f7','#0288d1'],
-  ['#334466','#c0c8d8'],
-];
-const _L2D = _D2L.map(([d,l]) => [l,d]);
-
-function _apaSwap(el, pairs) {
-  const s = el.getAttribute('style'); if (!s) return;
-  let result = s;
-  pairs.forEach(([a,b]) => {
-    const re = new RegExp(a.replace(/[#]/g,'\\$&'), 'gi');
-    result = result.replace(re, b);
-  });
-  if (result !== s) el.setAttribute('style', result);
-}
-function _apaPatchAll(pairs) {
-  document.querySelectorAll('[style]').forEach(el => _apaSwap(el, pairs));
-}
+    ui.add_head_html('''<script>
 function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
   if (typeof Plotly === 'undefined') return;
   document.querySelectorAll('.js-plotly-plot').forEach(div => {
     try {
+      const isLight = fontColor === '#24292f';
       Plotly.relayout(div, {
-        paper_bgcolor: bgPaper,
-        plot_bgcolor:  bgPlot,
-        'font.color':  fontColor,
-        'title.font.color': fontColor,
-        'scene.bgcolor': bgPlot,
-        'polar.bgcolor': bgPlot,
+        paper_bgcolor: bgPaper, plot_bgcolor: bgPlot,
+        'font.color': fontColor, 'title.font.color': fontColor,
+        'scene.bgcolor': bgPlot, 'polar.bgcolor': bgPlot,
         'polar.angularaxis.tickcolor': fontColor,
         'polar.angularaxis.tickfont.color': fontColor,
         'polar.radialaxis.tickfont.color': fontColor,
-        'polar.radialaxis.gridcolor': bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
-        'xaxis.gridcolor':  bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
-        'yaxis.gridcolor':  bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
-        'xaxis.zerolinecolor': bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
-        'yaxis.zerolinecolor': bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
-        'xaxis.tickfont.color': fontColor,
-        'yaxis.tickfont.color': fontColor,
-        'xaxis.title.font.color': fontColor,
-        'yaxis.title.font.color': fontColor,
+        'polar.radialaxis.gridcolor': isLight ? '#c0c8d8' : '#334466',
+        'xaxis.gridcolor': isLight ? '#c0c8d8' : '#334466',
+        'yaxis.gridcolor': isLight ? '#c0c8d8' : '#334466',
+        'xaxis.zerolinecolor': isLight ? '#c0c8d8' : '#334466',
+        'yaxis.zerolinecolor': isLight ? '#c0c8d8' : '#334466',
+        'xaxis.tickfont.color': fontColor, 'yaxis.tickfont.color': fontColor,
+        'xaxis.title.font.color': fontColor, 'yaxis.title.font.color': fontColor,
         'legend.font.color': fontColor,
-        'legend.bgcolor': bgPaper === '#e8ecf0' ? 'rgba(240,242,245,0.85)' : 'rgba(0,0,0,0.3)',
+        'legend.bgcolor': isLight ? 'rgba(240,242,245,0.85)' : 'rgba(0,0,0,0.3)',
       });
     } catch(e) {}
   });
 }
-function _apaToLight() {
-  window._apaLight = true;
-  _apaPatchAll(_D2L);
-  document.body.style.background = '#f5f7fa';
-  document.body.style.color      = '#24292f';
-  _apaRelayoutPlotly('#e8ecf0', '#f0f2f5', '#24292f');
-}
-function _apaToDark() {
-  window._apaLight = false;
-  _apaPatchAll(_L2D);
-  document.body.style.background = '#0d1117';
-  document.body.style.color      = '#e0e0e0';
-  _apaRelayoutPlotly('#16213e', '#1a1a2e', '#e0e0e0');
-}
-/* MutationObserver: auto-patch newly added nodes when in light mode */
-new MutationObserver(muts => {
-  if (!window._apaLight) return;
-  muts.forEach(m => m.addedNodes.forEach(n => {
-    if (n.nodeType !== 1) return;
-    _apaSwap(n, _D2L);
-    n.querySelectorAll && n.querySelectorAll('[style]').forEach(c => _apaSwap(c, _D2L));
-  }));
-}).observe(document.documentElement, { childList: true, subtree: true });
 </script>''')
 
     _dark = ui.dark_mode(value=True)
     _theme = {'dark': True}
 
-    with ui.header(elevated=True).style(
-            'background:#161b22; border-bottom:1px solid #30363d; padding:6px 18px'):
+    with ui.header(elevated=True).style('padding:6px 18px'):
         ui.label('📡 Antenna Pattern Analyzer').style(
-            'font-size:1.3rem; font-weight:700; color:#58a6ff; letter-spacing:1px')
+            'font-size:1.3rem; font-weight:700; letter-spacing:1px').classes('text-primary')
         ui.space()
 
         def _toggle_theme():
@@ -321,20 +173,18 @@ new MutationObserver(muts => {
                 _dark.enable()
                 _theme_icon.set_content(_MOON_SVG)
                 _theme_btn.style('color:#8b949e')
-                ui.run_javascript('_apaToDark()')
+                ui.run_javascript('_apaRelayoutPlotly("#16213e","#1a1a2e","#e0e0e0")')
             else:
                 _dark.disable()
                 _theme_icon.set_content(_SUN_SVG)
                 _theme_btn.style('color:#ffd600')
-                ui.run_javascript('_apaToLight()')
+                ui.run_javascript('_apaRelayoutPlotly("#f5f7fa","#f0f2f5","#24292f")')
 
         with ui.button(on_click=_toggle_theme).props('flat round dense').style(
-                'color:#8b949e; border:1px solid #30363d; border-radius:50%; '
-                'width:34px; height:34px; padding:0; min-width:0') as _theme_btn:
+                'color:#8b949e; width:34px; height:34px; padding:0; min-width:0') as _theme_btn:
             _theme_icon = ui.html(_MOON_SVG)
 
-    with ui.tabs().props('dense indicator-color=blue').classes('w-full').style(
-            'background:#161b22; border-bottom:1px solid #30363d') as tabs:
+    with ui.tabs().props('dense indicator-color=blue').classes('w-full') as tabs:
         t_single   = ui.tab('Single',   icon='tune')
         t_batch    = ui.tab('Batch',    icon='folder_open')
         t_coverage = ui.tab('Coverage', icon='radar')
@@ -345,8 +195,7 @@ new MutationObserver(muts => {
     _ui_tabs['t_coverage'] = t_coverage
     _ui_tabs['t_combine']  = t_combine
 
-    with ui.tab_panels(tabs, value=t_single).classes('w-full').style(
-            'background:#0d1117; padding:0'):
+    with ui.tab_panels(tabs, value=t_single).classes('w-full').style('padding:0'):
         with ui.tab_panel(t_single).style('padding:8px'):
             _build_single_tab()
         with ui.tab_panel(t_batch).style('padding:8px'):
@@ -370,7 +219,7 @@ def _build_single_tab():
 
             with _card('Load Pattern'):
                 fmt_dd = ui.select(FORMATS, value='auto', label='Format hint').props(
-                    'dense dark outlined').classes('w-full')
+                    'dense outlined').classes('w-full')
                 ui.upload(
                     label='Drop / click to upload', auto_upload=True,
                     on_upload=lambda e: _on_upload_single(
@@ -385,10 +234,10 @@ def _build_single_tab():
 
             with _card('Parameters'):
                 with ui.grid(columns=2).classes('w-full gap-1'):
-                    pt_inp   = ui.number('Tx Power (dBW)', value=0.0, format='%.1f').props('dense dark outlined')
-                    loss_inp = ui.number('Loss (dB)',       value=0.0, format='%.1f').props('dense dark outlined')
-                    rw_inp   = ui.number('Rw (dB)',         value=0.0, format='%.1f').props('dense dark outlined')
-                    dist_inp = ui.number('Distance (m)',    value=1.0, format='%.2f').props('dense dark outlined')
+                    pt_inp   = ui.number('Tx Power (dBW)', value=0.0, format='%.1f').props('dense outlined')
+                    loss_inp = ui.number('Loss (dB)',       value=0.0, format='%.1f').props('dense outlined')
+                    rw_inp   = ui.number('Rw (dB)',         value=0.0, format='%.1f').props('dense outlined')
+                    dist_inp = ui.number('Distance (m)',    value=1.0, format='%.2f').props('dense outlined')
 
                 def _reprocess():
                     if _state['P_single'] is None:
@@ -445,10 +294,10 @@ def _build_single_tab():
 
             with _card('Rotation (cumulative SO(3))'):
                 with ui.grid(columns=2).classes('w-full gap-1'):
-                    src_th = ui.number('Src θ (°)', value=0.0).props('dense dark outlined')
-                    src_ph = ui.number('Src φ (°)', value=0.0).props('dense dark outlined')
-                    dst_th = ui.number('Dst θ (°)', value=0.0).props('dense dark outlined')
-                    dst_ph = ui.number('Dst φ (°)', value=0.0).props('dense dark outlined')
+                    src_th = ui.number('Src θ (°)', value=0.0).props('dense outlined')
+                    src_ph = ui.number('Src φ (°)', value=0.0).props('dense outlined')
+                    dst_th = ui.number('Dst θ (°)', value=0.0).props('dense outlined')
+                    dst_ph = ui.number('Dst φ (°)', value=0.0).props('dense outlined')
 
                 def _do_rotate():
                     if _state['R_single_base'] is None:
@@ -516,29 +365,26 @@ def _build_single_tab():
 
             # Plot controls bar
             with ui.row().classes('w-full gap-2 items-center').style(
-                    'background:#161b22; border-radius:6px; padding:6px 10px; '
-                    'border:1px solid #30363d; flex-wrap:wrap'):
+                    'border-radius:6px; padding:6px 10px; flex-wrap:wrap'):
                 comp_dd  = ui.select(COMPONENTS, value='Total Gain', label='Component').props(
-                    'dense dark outlined').style('min-width:128px')
+                    'dense outlined').style('min-width:128px')
                 plot_dd  = ui.select(PLOT_TYPES, value='Contour', label='Plot Type').props(
-                    'dense dark outlined').style('min-width:140px')
+                    'dense outlined').style('min-width:140px')
                 cut_type = ui.select(CUT_TYPES, value='Phi Cut', label='Cut Type').props(
-                    'dense dark outlined').style('min-width:106px')
+                    'dense outlined').style('min-width:106px')
                 cut_val  = ui.number('Cut Value (°)', value=0.0, format='%.1f').props(
-                    'dense dark outlined').style('min-width:106px')
+                    'dense outlined').style('min-width:106px')
                 _CUT_COMPS = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
                 cut_comp = ui.select(
                     _CUT_COMPS, value=_CUT_COMPS, multiple=True,
                     label='Cut Components').props(
-                    'dense dark outlined use-chips').style('min-width:160px')
+                    'dense outlined use-chips').style('min-width:160px')
                 cmin_inp = ui.number('Cmin (dB)', value=-50.0, format='%.0f').props(
-                    'dense dark outlined').style('min-width:88px')
+                    'dense outlined').style('min-width:88px')
                 cmax_inp = ui.number('Cmax (dB)', value=0.0,   format='%.0f').props(
-                    'dense dark outlined').style('min-width:88px')
-                cb_peak = ui.checkbox('Peak', value=True).props(
-                    'dark color=blue').style('color:#e0e0e0')
-                cb_hpbw = ui.checkbox('HPBW', value=False).props(
-                    'dark color=yellow').style('color:#e0e0e0')
+                    'dense outlined').style('min-width:88px')
+                cb_peak = ui.checkbox('Peak', value=True).props('color=blue')
+                cb_hpbw = ui.checkbox('HPBW', value=False).props('color=yellow')
 
                 def _update_controls_visibility():
                     is_cut = plot_dd.value in CUT_PLOT_TYPES
@@ -584,16 +430,9 @@ def _build_single_tab():
                 dt_in   = ui.tab('Input Data')
                 dt_data = ui.tab('Output Data')
 
-            with ui.tab_panels(dtabs, value=dt_in).classes('w-full').style(
-                    'background:#0d1117'):
+            with ui.tab_panels(dtabs, value=dt_in).classes('w-full'):
 
                 with ui.tab_panel(dt_in):
-                    with ui.row().classes('w-full items-center gap-2').style('padding:4px 0'):
-                        tbl_in_filter = ui.input(
-                            placeholder='Filter rows…').props(
-                            'dense dark outlined clearable').style(
-                            'flex:1; max-width:260px')
-                        lbl_in_count = ui.label('').style('color:#8b949e; font-size:0.75rem')
                     _IN_COLS = [
                         {'name': 'row_num', 'label': '#',        'field': 'row_num', 'align': 'right',  'style': 'width:46px; color:#57606a'},
                         {'name': 'theta',   'label': 'θ (°)',    'field': 'theta',   'sortable': True},
@@ -605,18 +444,10 @@ def _build_single_tab():
                     ]
                     tbl_in = ui.table(
                         columns=_IN_COLS, rows=[], row_key='row_num',
-                    ).props('dense dark flat virtual-scroll sticky-header').style(
-                        'max-height:240px').classes('w-full')
-                    tbl_in_filter.on('update:model-value',
-                        lambda e, t=tbl_in: t.props(f'filter="{e.args or ""}"'))
+                    ).props('dense flat virtual-scroll sticky-header').style(
+                        'height:240px').classes('w-full')
 
                 with ui.tab_panel(dt_data):
-                    with ui.row().classes('w-full items-center gap-2').style('padding:4px 0'):
-                        tbl_data_filter = ui.input(
-                            placeholder='Filter rows…').props(
-                            'dense dark outlined clearable').style(
-                            'flex:1; max-width:260px')
-                        lbl_data_count = ui.label('').style('color:#8b949e; font-size:0.75rem')
                     _DATA_COLS = [
                         {'name': 'row_num', 'label': '#',              'field': 'row_num', 'align': 'right', 'style': 'width:46px; color:#57606a'},
                         {'name': 'theta',   'label': 'θ (°)',          'field': 'theta',   'sortable': True},
@@ -630,15 +461,12 @@ def _build_single_tab():
                     ]
                     tbl_data = ui.table(
                         columns=_DATA_COLS, rows=[], row_key='row_num',
-                    ).props('dense dark flat virtual-scroll sticky-header').style(
-                        'max-height:240px').classes('w-full')
-                    tbl_data_filter.on('update:model-value',
-                        lambda e, t=tbl_data: t.props(f'filter="{e.args or ""}"'))
+                    ).props('dense flat virtual-scroll sticky-header').style(
+                        'height:240px').classes('w-full')
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
             tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
             # Store count labels in plot_refs so _do_process_single can update them
-            plot_refs.update(lbl_in_count=lbl_in_count, lbl_data_count=lbl_data_count)
 
 
 # ── Single-tab callbacks ──────────────────────────────────────────────────────
@@ -713,8 +541,6 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in idx
         ]
         tbl_in.update()
-        if plot_refs.get('lbl_in_count') is not None:
-            plot_refs['lbl_in_count'].set_text(f'{n:,} rows')
 
         # ── Output data table — ALL rows ────────────────────────────────────
         tbl_data.rows = [
@@ -729,8 +555,6 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in idx
         ]
         tbl_data.update()
-        if plot_refs.get('lbl_data_count') is not None:
-            plot_refs['lbl_data_count'].set_text(f'{n:,} rows')
 
         # ── Output metrics table ──────────────────────────────────────────
         tbl_out.rows = [{'metric': r[0], 'value': r[1]} for r in R.table_rows]
@@ -796,10 +620,10 @@ def _build_batch_tab():
 
             with _card('Parameters'):
                 with ui.grid(columns=2).classes('w-full gap-1'):
-                    b_pt   = ui.number('Tx Power (dBW)', value=0.0).props('dense dark outlined')
-                    b_loss = ui.number('Loss (dB)',       value=0.0).props('dense dark outlined')
-                    b_rw   = ui.number('Rw (dB)',         value=0.0).props('dense dark outlined')
-                    b_dist = ui.number('Distance (m)',    value=1.0).props('dense dark outlined')
+                    b_pt   = ui.number('Tx Power (dBW)', value=0.0).props('dense outlined')
+                    b_loss = ui.number('Loss (dB)',       value=0.0).props('dense outlined')
+                    b_rw   = ui.number('Rw (dB)',         value=0.0).props('dense outlined')
+                    b_dist = ui.number('Distance (m)',    value=1.0).props('dense outlined')
 
             def _run_batch():
                 entries = _state['batch_entries']
@@ -850,8 +674,7 @@ def _build_batch_tab():
 
             with _card('File List'):
                 file_list = ui.list().props('dense bordered').style(
-                    'max-height:260px; overflow-y:auto; '
-                    'background:#0d1117; border-radius:4px')
+                    'max-height:260px; overflow-y:auto')
                 refs['file_list'] = file_list
 
         with ui.column().classes('flex-1').style('gap:6px'):
@@ -864,9 +687,9 @@ def _build_batch_tab():
                     b_view = ui.select(
                         ['Contour', 'Circular', 'Polar Cut', '3D Pattern'],
                         value='Contour', label='View').props(
-                        'dense dark outlined').style('min-width:120px')
+                        'dense outlined').style('min-width:120px')
                     b_comp = ui.select(COMPONENTS[:3], value='Total Gain', label='Comp').props(
-                        'dense dark outlined').style('min-width:128px')
+                        'dense outlined').style('min-width:128px')
                     lbl_sel = ui.label('Click a file').style(
                         'color:#8b949e; font-size:0.78rem; flex:1')
                 inspect_plot = ui.plotly({}).classes('w-full').style('height:360px')
@@ -878,38 +701,44 @@ def _build_batch_tab():
         for ent in _state['batch_entries']:
             icon = '✅' if ent.get('ok') else ('❌' if ent.get('err') else '⏳')
             with lst:
-                with ui.row().classes('w-full items-center gap-1').style(
-                        'padding:4px 6px; flex-wrap:nowrap'):
-                    with ui.column().classes('flex-1').style('gap:1px; cursor:pointer; overflow:hidden').on(
-                            'click', lambda _, e=ent: _select_entry(e, refs)):
-                        name_lbl = ui.label(f'{icon} {ent["name"]}').style(
-                            'font-size:0.82rem; color:#e0e0e0; '
-                            'overflow:hidden; text-overflow:ellipsis; white-space:nowrap')
-                        if ent.get('ok') and ent.get('R'):
-                            R = ent['R']
-                            ui.label(
-                                f'Peak {R.max_gain_dB:.2f} dBi  •  {R.dominant_pol}'
-                            ).style('font-size:0.72rem; color:#8b949e')
-                        elif ent.get('err'):
-                            ui.label(ent['err'][:80]).style('font-size:0.72rem; color:#ef5350')
+                with ui.item().style('padding:2px 4px; min-height:0'):
+                    with ui.item_section():
+                        with ui.row().classes('w-full items-center gap-1').style('flex-wrap:nowrap'):
+                            with ui.column().classes('flex-1').style(
+                                    'gap:1px; cursor:pointer; overflow:hidden').on(
+                                    'click', lambda _, e=ent: _select_entry(e, refs)):
+                                name_lbl = ui.label(f'{icon} {ent["name"]}').style(
+                                    'font-size:0.82rem; overflow:hidden; '
+                                    'text-overflow:ellipsis; white-space:nowrap')
+                                if ent.get('ok') and ent.get('R'):
+                                    R = ent['R']
+                                    ui.label(
+                                        f'Peak {R.max_gain_dB:.2f} dBi  •  {R.dominant_pol}'
+                                    ).classes('text-caption text-grey-6')
+                                elif ent.get('err'):
+                                    ui.label(ent['err'][:80]).style(
+                                        'font-size:0.72rem; color:#ef5350')
 
-                    def _batch_rename(e=ent, lbl=name_lbl, icon_str=icon):
-                        with ui.dialog() as dlg, ui.card().style(
-                                'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
-                            ui.label('Rename Pattern').style(
-                                'color:#e0e0e0; font-weight:600; font-size:0.9rem')
-                            inp = ui.input(value=e['name']).props(
-                                'dense dark outlined').classes('w-full').style('min-width:240px')
-                            with ui.row().classes('gap-1'):
-                                def _save(entry=e, label=lbl, d=dlg, inpt=inp, ic=icon_str):
-                                    v = inpt.value.strip()
-                                    if v: entry['name'] = v; label.set_text(f'{ic} {v}')
-                                    d.close()
-                                ui.button('Save',   on_click=_save).props('flat color=blue size=sm')
-                                ui.button('Cancel', on_click=dlg.close).props('flat color=grey size=sm')
-                        dlg.open()
-                    ui.button(icon='edit', on_click=_batch_rename).props(
-                        'flat round dense size=xs').style('color:#8b949e; flex-shrink:0')
+                            def _batch_rename(e=ent, lbl=name_lbl, icon_str=icon):
+                                with ui.dialog() as dlg, ui.card().props('bordered').style(
+                                        'padding:14px; gap:8px'):
+                                    ui.label('Rename Pattern').classes(
+                                        'text-subtitle2 text-weight-medium')
+                                    inp = ui.input(value=e['name']).props(
+                                        'dense outlined').classes('w-full').style('min-width:240px')
+                                    with ui.row().classes('gap-1'):
+                                        def _save(entry=e, label=lbl, d=dlg,
+                                                  inpt=inp, ic=icon_str):
+                                            v = inpt.value.strip()
+                                            if v: entry['name'] = v; label.set_text(f'{ic} {v}')
+                                            d.close()
+                                        ui.button('Save', on_click=_save).props(
+                                            'flat color=blue size=sm')
+                                        ui.button('Cancel', on_click=dlg.close).props(
+                                            'flat color=grey size=sm')
+                                dlg.open()
+                            ui.button(icon='edit', on_click=_batch_rename).props(
+                                'flat round dense size=xs color=grey')
 
     def _refresh_batch_summary(plt_el):
         ok = [e for e in _state['batch_entries'] if e.get('ok') and e.get('R')]
@@ -962,9 +791,7 @@ def _build_coverage_tab():
             with _card('Loaded Patterns'):
                 lbl_cov_n = ui.label('0 patterns loaded').style(
                     'color:#8b949e; font-size:0.78rem')
-                with ui.scroll_area().style(
-                        'max-height:200px; width:100%; background:#0d1117; '
-                        'border-radius:4px; border:1px solid #30363d'):
+                with ui.scroll_area().style('max-height:200px; width:100%'):
                     cov_list_col = ui.column().classes('w-full').style(
                         'gap:2px; padding:4px')
 
@@ -988,23 +815,23 @@ def _build_coverage_tab():
 
             with _card('Coverage Parameters'):
                 cov_mode = ui.radio(['Spherical', 'Conical'], value='Spherical').props(
-                    'dark inline color=blue').classes('w-full')
+                    'inline color=blue').classes('w-full')
 
                 with ui.column().classes('w-full gap-1') as cone_col:
-                    cone_th  = ui.number('Cone axis θ (°)', value=0.0,  format='%.1f').props('dense dark outlined')
-                    cone_ph  = ui.number('Cone axis φ (°)', value=0.0,  format='%.1f').props('dense dark outlined')
-                    cone_ang = ui.number('Half-angle (°)',  value=60.0, format='%.1f').props('dense dark outlined')
+                    cone_th  = ui.number('Cone axis θ (°)', value=0.0,  format='%.1f').props('dense outlined')
+                    cone_ph  = ui.number('Cone axis φ (°)', value=0.0,  format='%.1f').props('dense outlined')
+                    cone_ang = ui.number('Half-angle (°)',  value=60.0, format='%.1f').props('dense outlined')
                 cone_col.set_visibility(False)
 
                 def _on_mode_change(_e=None):
                     cone_col.set_visibility(cov_mode.value == 'Conical')
                 cov_mode.on('update:model-value', _on_mode_change)
 
-                ui.separator().style('background:#30363d')
+                ui.separator()
                 with ui.grid(columns=3).classes('w-full gap-1'):
-                    thr_min  = ui.number('Min (dB)',  value=-40.0, format='%.0f').props('dense dark outlined')
-                    thr_max  = ui.number('Max (dB)',  value=0.0,   format='%.0f').props('dense dark outlined')
-                    thr_step = ui.number('Step (dB)', value=1.0,   format='%.1f').props('dense dark outlined')
+                    thr_min  = ui.number('Min (dB)',  value=-40.0, format='%.0f').props('dense outlined')
+                    thr_max  = ui.number('Max (dB)',  value=0.0,   format='%.0f').props('dense outlined')
+                    thr_step = ui.number('Step (dB)', value=1.0,   format='%.1f').props('dense outlined')
 
             def _run_coverage():
                 pats = [p for p in _state['cov_patterns'] if p.get('enabled', True)]
@@ -1052,7 +879,7 @@ def _build_coverage_tab():
             with _card('Coverage Results  (threshold × patterns)'):
                 cov_results_tbl = ui.table(
                     columns=[], rows=[], row_key='threshold',
-                ).props('dense dark flat virtual-scroll').style(
+                ).props('dense flat virtual-scroll').style(
                     'max-height:220px').classes('w-full')
 
     # ── Helpers ──────────────────────────────────────────────────────────────
@@ -1068,20 +895,17 @@ def _build_coverage_tab():
                 cb = ui.checkbox(
                     value=pat_entry.get('enabled', True),
                     on_change=_on_cov_cb_change,
-                ).props('dark color=blue size=xs')
+                ).props('color=blue size=xs')
                 name_lbl = ui.label(pat_entry['name']).style(
-                    'font-size:0.8rem; color:#e0e0e0; flex:1; '
-                    'overflow:hidden; text-overflow:ellipsis')
+                    'font-size:0.8rem; flex:1; overflow:hidden; text-overflow:ellipsis')
                 ui.label(f'{pat_entry["R"].max_gain_dB:.1f} dBi').style(
                     'font-size:0.75rem; color:#8b949e; white-space:nowrap')
 
                 def _cov_rename(p=pat_entry, lbl=name_lbl):
-                    with ui.dialog() as dlg, ui.card().style(
-                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
-                        ui.label('Rename Pattern').style(
-                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                    with ui.dialog() as dlg, ui.card().style('padding:14px; gap:8px').props('bordered'):
+                        ui.label('Rename Pattern').classes('text-subtitle2 text-weight-medium')
                         inp = ui.input(value=p['name']).props(
-                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                            'dense outlined').classes('w-full').style('min-width:240px')
                         with ui.row().classes('gap-1'):
                             def _save(entry=p, label=lbl, d=dlg, inpt=inp):
                                 v = inpt.value.strip()
@@ -1157,19 +981,16 @@ async def _on_cov_upload(e, lst_col, lbl, refresh_plot_fn):
                 def _cov_cb(ev, p=pat_entry):
                     p.update({'enabled': ev.value})
                     refresh_plot_fn()
-                cb = ui.checkbox(value=True, on_change=_cov_cb).props('dark color=blue size=xs')
+                cb = ui.checkbox(value=True, on_change=_cov_cb).props('color=blue size=xs')
                 name_lbl2 = ui.label(P.name).style(
-                    'font-size:0.8rem; color:#e0e0e0; flex:1; '
-                    'overflow:hidden; text-overflow:ellipsis')
+                    'font-size:0.8rem; flex:1; overflow:hidden; text-overflow:ellipsis')
                 ui.label(f'{R.max_gain_dB:.1f} dBi').style(
                     'font-size:0.75rem; color:#8b949e; white-space:nowrap')
                 def _cov_upload_rename(p=pat_entry, lbl=name_lbl2):
-                    with ui.dialog() as dlg, ui.card().style(
-                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
-                        ui.label('Rename Pattern').style(
-                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                    with ui.dialog() as dlg, ui.card().style('padding:14px; gap:8px').props('bordered'):
+                        ui.label('Rename Pattern').classes('text-subtitle2 text-weight-medium')
                         inp = ui.input(value=p['name']).props(
-                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                            'dense outlined').classes('w-full').style('min-width:240px')
                         with ui.row().classes('gap-1'):
                             def _save(entry=p, label=lbl, d=dlg, inpt=inp):
                                 v = inpt.value.strip()
@@ -1211,8 +1032,7 @@ def _build_combine_tab():
                 ).classes('w-full')
                 lbl_cmb_n = ui.label('0 pattern(s)').style('color:#8b949e; font-size:0.78rem')
                 cmb_list = ui.list().props('dense bordered').style(
-                    'max-height:150px; overflow-y:auto; '
-                    'background:#0d1117; border-radius:4px')
+                    'max-height:150px; overflow-y:auto')
 
                 def _clear_cmb():
                     _state['cmb_patterns'].clear(); _state['cmb_result'] = None
@@ -1226,7 +1046,7 @@ def _build_combine_tab():
 
             with _card('Combine Method'):
                 cmb_method = ui.radio(METHODS_DISPLAY, value='Incoherent').props(
-                    'dark color=blue').classes('w-full')
+                    'color=blue').classes('w-full')
                 ui.label(
                     'Incoherent = power sum  |  Coherent = E-field sum\n'
                     'Envelope = max per direction  |  Regional Mask = sector selection'
@@ -1234,8 +1054,7 @@ def _build_combine_tab():
 
         with ui.column().classes('flex-1').style('gap:6px; min-width:0'):
             with _card('Loaded Patterns Preview'):
-                loaded_scroll = ui.scroll_area().style(
-                    'width:100%; height:280px; background:#0d1117; border-radius:4px')
+                loaded_scroll = ui.scroll_area().style('width:100%; height:280px')
                 with loaded_scroll:
                     subplot_row = ui.row().classes('gap-2').style(
                         'flex-wrap:nowrap; padding:6px; align-items:flex-start')
@@ -1251,9 +1070,9 @@ def _build_combine_tab():
                         ['Contour', 'Circular', '3D Pattern', '3D Spherical',
                          'Polar Cut', 'Rect Cut'],
                         value='Contour', label='Plot').props(
-                        'dense dark outlined').style('min-width:140px')
+                        'dense outlined').style('min-width:140px')
                     cp_comp = ui.select(COMPONENTS[:3], value='Total Gain', label='Comp').props(
-                        'dense dark outlined').style('min-width:128px')
+                        'dense outlined').style('min-width:128px')
 
                     def _refresh_cmb_plot():
                         R = _state.get('cmb_result')
@@ -1277,21 +1096,19 @@ def _build_combine_tab():
 
     # ── Regional Mask panel ────────────────────────────────────────────────
     with ui.column().classes('w-full').style('gap:6px') as mask_outer:
-        with ui.card().tight().style(
-                'background:#161b22; border:1px solid #30363d; border-radius:8px; '
-                'padding:10px; width:100%; gap:6px').classes('w-full'):
-            ui.label('REGIONAL MASKS').style(
-                'font-size:0.75rem; font-weight:600; color:#8b949e; '
-                'text-transform:uppercase; letter-spacing:0.08em')
+        with ui.card().tight().props('bordered').classes('w-full').style(
+                'border-radius:8px; padding:10px; width:100%; gap:6px'):
+            ui.label('REGIONAL MASKS').classes('text-caption text-grey-6').style(
+                'font-weight:600; text-transform:uppercase; letter-spacing:0.08em')
 
             with ui.row().classes('w-full items-center gap-2'):
                 ui.label('Mask type (all patterns):').style(
-                    'color:#e0e0e0; font-size:0.82rem; white-space:nowrap')
+                    'font-size:0.82rem; white-space:nowrap')
                 mask_type_global = ui.select(
                     MASK_TYPE_DISPLAY, value='Phi / Azimuthal',
-                    label='Type').props('dense dark outlined').style('min-width:200px')
+                    label='Type').props('dense outlined').style('min-width:200px')
 
-            ui.separator().style('background:#30363d')
+            ui.separator()
 
             with ui.scroll_area().style('max-height:280px; width:100%'):
                 mask_col = ui.column().classes('w-full').style('gap:4px')
@@ -1392,27 +1209,27 @@ def _build_combine_tab():
                         phi_span = 360.0 / n_pats
                         row_dict['phi_min_el'] = ui.number(
                             'φ min', value=round(idx * phi_span, 1),
-                            format='%.1f').props('dense dark outlined').style('width:72px')
+                            format='%.1f').props('dense outlined').style('width:72px')
                         row_dict['phi_max_el'] = ui.number(
                             'φ max',
                             value=round((idx+1)*phi_span - (1.0 if idx < n_pats-1 else 0.0), 1),
-                            format='%.1f').props('dense dark outlined').style('width:72px')
+                            format='%.1f').props('dense outlined').style('width:72px')
                         th_span = 180.0 / n_pats
                         row_dict['th_min_el'] = ui.number(
                             'θ min', value=round(idx * th_span, 1),
-                            format='%.1f').props('dense dark outlined').style('width:66px')
+                            format='%.1f').props('dense outlined').style('width:66px')
                         row_dict['th_max_el'] = ui.number(
                             'θ max',
                             value=round((idx+1)*th_span - (1.0 if idx < n_pats-1 else 0.0), 1),
-                            format='%.1f').props('dense dark outlined').style('width:66px')
+                            format='%.1f').props('dense outlined').style('width:66px')
                     else:
                         lbl_v1, lbl_v2 = (('θ min', 'θ max') if is_theta else ('φ min', 'φ max'))
                         row_dict['v1_el'] = ui.number(
                             lbl_v1, value=v1_default,
-                            format='%.1f').props('dense dark outlined').style('width:88px')
+                            format='%.1f').props('dense outlined').style('width:88px')
                         row_dict['v2_el'] = ui.number(
                             lbl_v2, value=v2_default,
-                            format='%.1f').props('dense dark outlined').style('width:88px')
+                            format='%.1f').props('dense outlined').style('width:88px')
 
             mask_rows.append(row_dict)
 
@@ -1452,12 +1269,10 @@ def _build_combine_tab():
                     ).props('caption')
 
                 def _cmb_rename(p=pat_entry, lbl=cmb_name_lbl):
-                    with ui.dialog() as dlg, ui.card().style(
-                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
-                        ui.label('Rename Pattern').style(
-                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                    with ui.dialog() as dlg, ui.card().style('padding:14px; gap:8px').props('bordered'):
+                        ui.label('Rename Pattern').classes('text-subtitle2 text-weight-medium')
                         inp = ui.input(value=p['name']).props(
-                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                            'dense outlined').classes('w-full').style('min-width:240px')
                         with ui.row().classes('gap-1'):
                             def _save(entry=p, label=lbl, d=dlg, inpt=inp):
                                 v = inpt.value.strip()
@@ -1510,12 +1325,10 @@ async def _on_cmb_upload(e, lst, lbl, mask_col, mask_rows, cmb_refs, subplot_row
                         f'Peak {R.max_gain_dB:.2f} dBi  •  {R.dominant_pol}'
                     ).props('caption')
                 def _cmb_ul_rename(p=pat_entry, lbl=cmb_ul_lbl):
-                    with ui.dialog() as dlg, ui.card().style(
-                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
-                        ui.label('Rename Pattern').style(
-                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                    with ui.dialog() as dlg, ui.card().style('padding:14px; gap:8px').props('bordered'):
+                        ui.label('Rename Pattern').classes('text-subtitle2 text-weight-medium')
                         inp = ui.input(value=p['name']).props(
-                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                            'dense outlined').classes('w-full').style('min-width:240px')
                         with ui.row().classes('gap-1'):
                             def _save(entry=p, label=lbl, d=dlg, inpt=inp):
                                 v = inpt.value.strip()
