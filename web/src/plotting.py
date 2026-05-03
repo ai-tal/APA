@@ -82,22 +82,6 @@ def _wrap_phi(R: ProcessedPattern, grid: np.ndarray):
     return pv_w, grid_w
 
 
-def _surface_hover_text(TH_deg: np.ndarray, PH_deg: np.ndarray,
-                         gw_cd: np.ndarray, label: str) -> list:
-    """Return a (nTh × nPh) list-of-lists of pre-built hover strings for go.Surface.
-
-    go.Surface indexes customdata in column-major order internally, which causes
-    customdata[j] to be out-of-bounds for j >= nTh when nPh > nTh (e.g. a full-
-    sphere 181×361 grid).  Using pre-built text strings sidesteps that entirely.
-    """
-    nTh, nPh = TH_deg.shape
-    return [
-        [f'θ={TH_deg[i, j]:.1f}°  φ={PH_deg[i, j]:.1f}°<br>{label}={gw_cd[i, j]:.2f}'
-         for j in range(nPh)]
-        for i in range(nTh)
-    ]
-
-
 def _cut_full360(R, cut_type, cut_value, component='Total Gain'):
     """Return (angles, G_tot, G_R, G_L) for a full-360° cut, loop-closed.
     Theta Cut: stitches forward (phi=cut_value) + mirror (phi=cut_value+180) halves.
@@ -523,7 +507,10 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
 
     r_max = float(r.max())
     gw_cd = np.where(np.isfinite(gw), gw, cmin)
-    hover = _surface_hover_text(TH_deg, PH_deg, gw_cd, label)
+    # Plotly go.Surface indexes customdata as customdata[col][row] = customdata[phi_j][theta_i].
+    # Our arrays are (nTh, nPh), so we must transpose to (nPh, nTh, 3) before stacking,
+    # otherwise customdata[j] is out-of-bounds for j >= nTh (second hemisphere).
+    cd = np.stack([TH_deg.T, PH_deg.T, gw_cd.T], axis=-1)   # shape (nPh, nTh, 3)
 
     _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
                     title='', showaxeslabels=False, showbackground=False,
@@ -538,8 +525,11 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
         surfacecolor=gw, cmin=cmin, cmax=cmax,
         colorscale=cs3d,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
-        text=hover,
-        hovertemplate='%{text}<extra></extra>',
+        customdata=cd,
+        hovertemplate=(
+            'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
+            + label + '=%{customdata[2]:.2f}<extra></extra>'
+        ),
         contours=_no_contour_highlight,
     ))
     for ax in _xyz_axes(r_max * 1.25):
@@ -580,7 +570,7 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
     Z = np.cos(TH)
 
     gw_cd = np.where(np.isfinite(gw), gw, cmin)
-    hover = _surface_hover_text(TH_deg, PH_deg, gw_cd, label)
+    cd = np.stack([TH_deg.T, PH_deg.T, gw_cd.T], axis=-1)   # (nPh, nTh, 3) — column-major for Plotly Surface
 
     _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
                     title='', showaxeslabels=False, showbackground=False,
@@ -596,8 +586,11 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
         colorscale=cs_sph,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         contours=_no_contour_highlight,
-        text=hover,
-        hovertemplate='%{text}<extra></extra>',
+        customdata=cd,
+        hovertemplate=(
+            'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
+            + label + '=%{customdata[2]:.2f}<extra></extra>'
+        ),
     ))
     for ax in _xyz_axes(1.35):
         fig.add_trace(ax)

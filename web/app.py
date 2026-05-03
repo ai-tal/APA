@@ -24,6 +24,7 @@ from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
 
 # ── Download store: large files served via HTTP endpoint, not WebSocket ───────
 _DL_STORE: dict[str, bytes] = {}
+_TBL_DISP = 10_000   # max rows sent to browser tables; all rows kept server-side for export
 
 @app.get('/api/dl/{token}')
 async def _dl_endpoint(token: str):
@@ -546,6 +547,9 @@ def _build_single_tab():
                         columns=_IN_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll virtual-scroll-sticky-size-start=28 rows-per-page=0').style(
                         'height:240px').classes('w-full apa-tbl')
+                    lbl_in_count = ui.label('').style(
+                        'font-size:0.73rem; color:#8b949e; padding:2px 4px')
+                    plot_refs['lbl_in_count'] = lbl_in_count
                     plot_refs['_all_in_rows'] = []
 
                 with ui.tab_panel(dt_data):
@@ -564,6 +568,9 @@ def _build_single_tab():
                         columns=_DATA_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll virtual-scroll-sticky-size-start=28 rows-per-page=0').style(
                         'height:240px').classes('w-full apa-tbl')
+                    lbl_data_count = ui.label('').style(
+                        'font-size:0.73rem; color:#8b949e; padding:2px 4px')
+                    plot_refs['lbl_data_count'] = lbl_data_count
                     plot_refs['_all_data_rows'] = []
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
@@ -651,8 +658,14 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_in_rows'] = all_in
-        tbl_in.rows = all_in
+        tbl_in.rows = all_in[:_TBL_DISP]
         tbl_in.update()
+        _lbl_in = plot_refs.get('lbl_in_count')
+        if _lbl_in is not None:
+            if n > _TBL_DISP:
+                _lbl_in.set_text(f'Showing {_TBL_DISP:,} of {n:,} rows — export contains all rows')
+            else:
+                _lbl_in.set_text(f'{n:,} rows')
 
         # ── Output data table ───────────────────────────────────────────────
         all_data = [
@@ -667,8 +680,14 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_data_rows'] = all_data
-        tbl_data.rows = all_data
+        tbl_data.rows = all_data[:_TBL_DISP]
         tbl_data.update()
+        _lbl_data = plot_refs.get('lbl_data_count')
+        if _lbl_data is not None:
+            if n > _TBL_DISP:
+                _lbl_data.set_text(f'Showing {_TBL_DISP:,} of {n:,} rows — export contains all rows')
+            else:
+                _lbl_data.set_text(f'{n:,} rows')
 
         # ── Output metrics table ──────────────────────────────────────────
         tbl_out.rows = [{'metric': r[0], 'value': r[1]} for r in R.table_rows]
