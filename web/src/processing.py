@@ -25,6 +25,8 @@ class ProcessedPattern:
     # Scalars
     max_gain_dB: float
     max_gain_dir: Tuple[float, float]   # (theta, phi)
+    eth_at_peak: float                  # |Eθ| at peak point (for E/H plane detection)
+    eph_at_peak: float                  # |Eφ| at peak point
     dominant_pol: str
     hpbw_e: Optional[float]
     hpbw_h: Optional[float]
@@ -110,8 +112,11 @@ def process_pattern(P: PatternData, params: dict = None) -> ProcessedPattern:
 
     # ---- Peak ----
     i_peak = int(np.argmax(G_total_dB))
-    max_gain_dB = float(G_total_dB[i_peak])
+    max_gain_dB  = float(G_total_dB[i_peak])
     max_gain_dir = (float(theta[i_peak]), float(phi[i_peak]))
+    # At-peak E-field magnitudes — used by ehPlanes() for E/H plane assignment
+    eth_at_peak  = float(Eth_used[i_peak])
+    eph_at_peak  = float(Eph_used[i_peak])
 
     # ---- Dominant polarisation ----
     mean_Eth = float(np.mean(Eth_used))
@@ -156,6 +161,7 @@ def process_pattern(P: PatternData, params: dict = None) -> ProcessedPattern:
         G_total_dB=G_total_dB, G_RHCP_dB=G_RHCP_dB, G_LHCP_dB=G_LHCP_dB,
         AR_dB=AR_dB, PLF_dB=PLF_dB, EIRP_dBW=EIRP_dBW, PFD_Wm2=PFD_Wm2,
         max_gain_dB=max_gain_dB, max_gain_dir=max_gain_dir,
+        eth_at_peak=eth_at_peak, eph_at_peak=eph_at_peak,
         dominant_pol=dominant_pol,
         hpbw_e=hpbw_e, hpbw_h=hpbw_h, fbr_dB=fbr_dB,
         directivity_dBi=directivity_dBi,

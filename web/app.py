@@ -795,14 +795,57 @@ def _build_cut_csv(R, plane_mode_val, cut_type_val, cut_val_val):
 
 
 def _eff_cut_params(R, plane_mode_val, cut_type_val, cut_val_val):
-    """Return effective (cut_type, cut_value) for E-Plane / H-Plane / Custom mode."""
+    """Return effective (cut_type, cut_value) using the boresight-axis E/H algorithm.
+
+    Port of MATLAB ehPlanes():
+      1. Detect cardinal boresight axis (+X/-X/+Y/-Y/+Z/-Z) — NOT raw peak phi.
+      2. Sample |Eθ|/|Eφ| AT the peak to decide which principal plane is E-plane.
+      3. Two principal-plane candidates determined by axis (meridian + perp. great circle).
+      4. Map E/H onto those two candidates based on at-peak polarisation dominance.
+    """
     if R is None or plane_mode_val == 'Custom':
         return cut_type_val, float(cut_val_val)
+
+    # ── 1. Cardinal boresight axis ─────────────────────────────────────────
+    boresight = detect_boresight(R)          # '+Z' | '-Z' | '+X' | '-X' | '+Y' | '-Y'
+
+    # ── 2. At-peak polarisation dominance ─────────────────────────────────
+    # getattr gracefully handles older ProcessedPattern objects without the field.
+    is_th_dom = getattr(R, 'eth_at_peak', 1.0) >= getattr(R, 'eph_at_peak', 0.0)
+
     peak_theta, peak_phi = R.max_gain_dir
+
+    # ── 3. Principal-plane pair (boresight-determined, NOT raw peak phi) ───
+    #   ±X : xz-meridian (Theta Cut φ=0/180) + equator (Phi Cut θ=90)
+    #   ±Y : yz-meridian (Theta Cut φ=90/270) + equator (Phi Cut θ=90)
+    #   ±Z : two orthogonal meridians (snap peak phi to nearest 0° or 90°)
+    if boresight == '+X':
+        meridian   = ('Theta Cut', 0.0)
+        perp_plane = ('Phi Cut',   90.0)
+    elif boresight == '-X':
+        meridian   = ('Theta Cut', 180.0)
+        perp_plane = ('Phi Cut',   90.0)
+    elif boresight == '+Y':
+        meridian   = ('Theta Cut', 90.0)
+        perp_plane = ('Phi Cut',   90.0)
+    elif boresight == '-Y':
+        meridian   = ('Theta Cut', 270.0)
+        perp_plane = ('Phi Cut',   90.0)
+    else:  # '+Z' or '-Z' — boresight near pole; snap to nearest cardinal meridian
+        phi_snap   = float(round((peak_phi % 180) / 90) * 90)
+        meridian   = ('Theta Cut', phi_snap % 360)
+        perp_plane = ('Theta Cut', (phi_snap + 90) % 360)
+
+    # ── 4. Assign E/H ─────────────────────────────────────────────────────
+    #   Eθ dominant → E-field lies along the meridian → E-plane = meridian
+    #   Eφ dominant → E-field is perpendicular → E-plane = perp great circle
+    e_plane = meridian   if is_th_dom else perp_plane
+    h_plane = perp_plane if is_th_dom else meridian
+
     if plane_mode_val == 'E-Plane':
-        return 'Theta Cut', float(peak_phi)
-    elif plane_mode_val == 'H-Plane':
-        return 'Theta Cut', float((peak_phi + 90) % 360)
+        return e_plane
+    if plane_mode_val == 'H-Plane':
+        return h_plane
     return cut_type_val, float(cut_val_val)
 
 
