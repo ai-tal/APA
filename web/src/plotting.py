@@ -109,18 +109,43 @@ def _cut_full360(R, cut_type, cut_value, component='Total Gain'):
 
 
 def _find_hpbw_crossings(angles: np.ndarray, G: np.ndarray):
-    """Return (crossings, r_cross) where crossings are angles at G_max−3 dB."""
+    """Return (crossings, r_cross) — the two main-lobe -3 dB edge angles.
+
+    Searches outward from the gain peak so sidelobes never inflate the HPBW.
+    Uses circular wrap so peaks at the 0°/360° boundary (+Z/−Z patterns) are
+    handled correctly without missing one side of the beam.
+    """
     if len(G) < 3:
         return [], []
-    peak = float(G.max())
-    half = peak - 3.0
+    n = len(G)
+    peak_idx = int(np.argmax(G))
+    half = float(G[peak_idx]) - 3.0
+    step = abs((float(angles[-1]) - float(angles[0])) / max(n - 1, 1))
+
     crossings, r_cross = [], []
-    for i in range(len(angles) - 1):
-        g0, g1 = float(G[i]), float(G[i + 1])
-        if (g0 >= half) != (g1 >= half):
-            frac = (half - g0) / (g1 - g0 + 1e-30)
-            crossings.append(float(angles[i]) + frac * float(angles[i + 1] - angles[i]))
+
+    # Left: walk decreasing index, wrap circularly
+    for di in range(1, n):
+        cur = (peak_idx - di)     % n   # one step further from peak
+        nxt = (peak_idx - di + 1) % n   # one step closer to peak
+        gc, gn = float(G[cur]), float(G[nxt])
+        if gn >= half > gc:             # falling edge going away from peak
+            frac = (gn - half) / (gn - gc + 1e-30)
+            crossings.append(float(angles[nxt]) - frac * step)
             r_cross.append(half)
+            break
+
+    # Right: walk increasing index, wrap circularly
+    for di in range(1, n):
+        cur = (peak_idx + di)     % n
+        prv = (peak_idx + di - 1) % n
+        gc, gp = float(G[cur]), float(G[prv])
+        if gp >= half > gc:
+            frac = (gp - half) / (gp - gc + 1e-30)
+            crossings.append(float(angles[prv]) + frac * step)
+            r_cross.append(half)
+            break
+
     return crossings, r_cross
 
 

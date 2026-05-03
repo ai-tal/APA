@@ -220,6 +220,47 @@ def get_cut(R: ProcessedPattern, cut_type: str, cut_value: float):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _hpbw_peak_centered(angles: np.ndarray, gains: np.ndarray):
+    """HPBW in degrees from a uniformly-sampled 1-D cut.
+
+    Searches outward from the gain peak on each side (circular wrap) so:
+      - Sidelobes are ignored — only the first falling edge per side counts.
+      - Peaks at the array boundary (theta=0 for +Z patterns on a 0→360° cut)
+        are handled without missing the opposite side.
+
+    Returns the beamwidth in degrees, or None if either edge is not found.
+    """
+    n = len(gains)
+    if n < 3:
+        return None
+    peak_idx = int(np.argmax(gains))
+    half = float(gains[peak_idx]) - 3.0
+    step = abs((float(angles[-1]) - float(angles[0])) / max(n - 1, 1))
+
+    left_dist = right_dist = None
+
+    # Left: decreasing index, circular wrap
+    for di in range(1, n):
+        cur = (peak_idx - di)     % n
+        nxt = (peak_idx - di + 1) % n
+        gc, gn = float(gains[cur]), float(gains[nxt])
+        if gn >= half > gc:
+            left_dist = (di - 1 + (gn - half) / (gn - gc + 1e-30)) * step
+            break
+
+    # Right: increasing index, circular wrap
+    for di in range(1, n):
+        cur = (peak_idx + di)     % n
+        prv = (peak_idx + di - 1) % n
+        gc, gp = float(gains[cur]), float(gains[prv])
+        if gp >= half > gc:
+            right_dist = (di - 1 + (gp - half) / (gp - gc + 1e-30)) * step
+            break
+
+    if left_dist is None or right_dist is None:
+        return None
+    return left_dist + right_dist
+
 def _detect_boresight_raw(theta, phi, G_dB) -> str:
     """Detect cardinal boresight axis (+X/-X/+Y/-Y/+Z/-Z) from flat arrays.
 
@@ -265,30 +306,39 @@ def _compute_hpbw_fbr(theta, phi, G_dB, peak_theta, peak_phi,
     half_power = G_dB.max() - 3.0
     eps = 2.0
 
-    def _hpbw_from_cut(angles, gain):
-        if len(gain) < 3:
-            return None
-        above = gain >= half_power
-        crossings = np.where(np.diff(above.astype(int)) != 0)[0]
-        if len(crossings) < 2:
-            return None
-        return abs(float(angles[crossings[-1]]) - float(angles[crossings[0]]))
-
     def _hpbw_theta_cut(phi_val):
-        """Theta sweep at fixed phi = phi_val."""
-        mask = np.abs(phi - phi_val) < eps
-        if mask.sum() < 3:
+        """Full-360° theta sweep: forward half (phi≈phi_val) + mirrored half (phi≈phi_val+180°).
+
+        Mirroring is essential for +Z/−Z patterns where the peak sits at theta=0/180
+        (array boundary) — without the mirror only one -3 dB edge is visible.
+        """
+        mask_f = np.abs(phi - phi_val) < eps
+        mirror = (phi_val + 180.0) % 360.0
+        mask_m = np.abs(phi - mirror) < eps
+        if mask_f.sum() < 2:
             return None
-        ord_ = np.argsort(theta[mask])
-        return _hpbw_from_cut(theta[mask][ord_], G_dB[mask][ord_])
+        ord_f = np.argsort(theta[mask_f])
+        th_f  = theta[mask_f][ord_f]
+        g_f   = G_dB[mask_f][ord_f]
+        if mask_m.sum() >= 2:
+            # Mirror half: theta 0→180 at phi_val+180 maps to angles 360→180
+            ord_m  = np.argsort(theta[mask_m])
+            th_m   = 360.0 - theta[mask_m][ord_m][::-1]  # ascending 180→360
+            g_m    = G_dB[mask_m][ord_m][::-1]
+            skip   = 1 if (len(th_m) > 0 and abs(th_m[0] - 180.0) < 0.5) else 0
+            th_360 = np.concatenate([th_f, th_m[skip:]])
+            g_360  = np.concatenate([g_f,  g_m[skip:]])
+        else:
+            th_360, g_360 = th_f, g_f
+        return _hpbw_peak_centered(th_360, g_360)
 
     def _hpbw_phi_cut(theta_val):
-        """Phi sweep at fixed theta = theta_val."""
+        """Phi sweep 0→360° at fixed theta (already a full circle — no mirroring needed)."""
         mask = np.abs(theta - theta_val) < eps
         if mask.sum() < 3:
             return None
         ord_ = np.argsort(phi[mask])
-        return _hpbw_from_cut(phi[mask][ord_], G_dB[mask][ord_])
+        return _hpbw_peak_centered(phi[mask][ord_], G_dB[mask][ord_])
 
     # ── 1. Cardinal boresight (raw arrays, no grid) ───────────────────────
     boresight  = _detect_boresight_raw(theta, phi, G_dB)
