@@ -1,0 +1,99 @@
+unction [eCut, hCut, eVal, hVal] = ehPlanes(R, boresightAxis)
+    % EHPLANES Resolve the E-Plane and H-Plane principal cuts for
+    % a processed pattern R, given the dominant boresight axis
+    % (one of '+X','-X','+Y','-Y','+Z','-Z').
+    %
+    % Output convention (matches plt.getCut):
+    %   'Phi Cut'   - FIX theta = val, SWEEP phi.  This is a
+    %                 circle of latitude (a great circle only
+    %                 when val == 90 deg, i.e. the equator).
+    %   'Theta Cut' - FIX phi   = val, SWEEP theta. This is a
+    %                 meridian / great circle through the poles.
+    %
+    % Geometric identification of E vs H:
+    %   At the peak direction, the unit vector theta_hat is
+    %   tangent to the meridian (along increasing theta), and
+    %   phi_hat is perpendicular to it (along increasing phi).
+    %     |E_theta| > |E_phi|  =>  E aligned with meridian
+    %                              => E-Plane = meridian.
+    %     |E_phi|   > |E_theta|=>  E perpendicular to meridian
+    %                              => E-Plane = the other plane
+    %                                 (perpendicular great circle).
+    %
+    % Principal great-circle pair per boresight axis:
+    %   +-Z  : two orthogonal meridians (Theta Cut at phi=phiM
+    %          and Theta Cut at phi=phiM+90).
+    %   +-X  : meridian at phi=0/180 (xz-plane) AND equator
+    %          (Phi Cut at theta=90, the xy-plane).
+    %   +-Y  : meridian at phi=90/270 (yz-plane) AND equator
+    %          (Phi Cut at theta=90).
+
+    eCut = 'Theta Cut'; hCut = 'Phi Cut';
+    eVal = 0;            hVal = 90;
+    if isempty(R) || ~isfield(R,'maxGain_dir'); return; end
+    if nargin < 2 || isempty(boresightAxis); boresightAxis = '+Z'; end
+
+    % ---- Peak direction (theta, phi) is used ONLY to sample
+    % which E-component dominates; the cut PLANES themselves
+    % are determined by the boresight axis.
+    peakTheta = R.maxGain_dir(1);   %#ok<NASGU>
+    peakPhi   = R.maxGain_dir(2);
+
+    try
+        % Snap to the nearest grid sample to read |E_theta| and
+        % |E_phi| at the peak.
+        [~, iThetaPeak] = min(abs(R.theta - R.maxGain_dir(1)));
+        [~, iPhiPeak]   = min(abs(R.phi   - R.maxGain_dir(2)));
+        ethMagAtPeak = abs(R.Eth(iThetaPeak, iPhiPeak));
+        ephMagAtPeak = abs(R.Eph(iThetaPeak, iPhiPeak));
+    catch
+        ethMagAtPeak = 1; ephMagAtPeak = 0;
+    end
+
+    % Build the two principal-plane candidates (meridian +
+    % perpendicular great circle) for the active boresight axis.
+    switch upper(boresightAxis)
+        case {'+Z','-Z'}
+            % Boresight along Z - the peak is near the pole and
+            % all meridians pass through it.  Snap the recorded
+            % peak phi to the nearest cardinal (0 or 90 deg) so
+            % we lock onto the standard xz / yz principal planes.
+            phiPrincipal = round(mod(peakPhi, 180) / 90) * 90;
+            meridian   = struct('cut','Theta Cut', 'val', mod(phiPrincipal,        360));
+            perpPlane  = struct('cut','Theta Cut', 'val', mod(phiPrincipal + 90,   360));
+    
+        case {'+X','-X'}
+            % Boresight along X - peak is on the equator at
+            % phi = 0 or 180.  Principal planes:
+            %   xz-plane = Theta Cut at phi=0 (meridian),
+            %   xy-plane = Phi Cut at theta=90 (equator).
+            phiMeridian = mod(round(peakPhi/180)*180, 360);
+            meridian  = struct('cut','Theta Cut', 'val', phiMeridian);
+            perpPlane = struct('cut','Phi Cut',   'val', 90);
+    
+        case {'+Y','-Y'}
+            % Boresight along Y - peak is on the equator at
+            % phi = 90 or 270.  Principal planes:
+            %   yz-plane = Theta Cut at phi=90 (meridian),
+            %   xy-plane = Phi Cut at theta=90 (equator).
+            phiMeridian = mod(round((peakPhi-90)/180)*180 + 90, 360);
+            meridian  = struct('cut','Theta Cut', 'val', phiMeridian);
+            perpPlane = struct('cut','Phi Cut',   'val', 90);
+    
+        otherwise
+            % Generic fallback: a meridian through peak phi and
+            % its perpendicular meridian (works for any axis).
+            meridian  = struct('cut','Theta Cut', 'val', mod(peakPhi,    360));
+            perpPlane = struct('cut','Theta Cut', 'val', mod(peakPhi+90, 360));
+    end
+    
+    % Map E and H onto the two candidates.
+    if ethMagAtPeak >= ephMagAtPeak
+        ePlane = meridian;  hPlane = perpPlane;
+    else
+        ePlane = perpPlane; hPlane = meridian;
+    end
+    
+    eCut = ePlane.cut; eVal = ePlane.val;
+    hCut = hPlane.cut; hVal = hPlane.val;
+end

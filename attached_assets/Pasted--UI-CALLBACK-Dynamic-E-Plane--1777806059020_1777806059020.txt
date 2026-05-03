@@ -1,0 +1,64 @@
+% ════════════════════════════════════════════════════════════════
+%  UI CALLBACK: Dynamic E-Plane / H-Plane Extraction Tracker
+% ════════════════════════════════════════════════════════════════
+function planeModeChangedEvent(app, ~)
+    mode = app.DropDown_PlaneMode.Value;
+    if strcmp(mode, 'Manual Cut')
+        app.DropDown_CutType.Enable = 'on';
+        app.Input_Cut_Value.Enable = 'on';
+        return;
+    end
+    
+    % Resolve geometry mapping natively from current Source Coordinates
+    if isempty(app.patData); return; end
+    
+    th = app.Input_SrcTheta.Value;
+    ph = app.Input_SrcPhi.Value;
+    
+    % Interpolate exact Dominant Polarization natively
+    [~, idx] = min((app.patData.theta - th).^2 + (app.patData.phi - ph).^2);
+    E_th = app.patData.G_theta_dB(idx);
+    E_ph = app.patData.G_phi_dB(idx);
+    
+    is_th_dom = false;
+    if ~isnan(E_th) && (isnan(E_ph) || E_th > E_ph)
+        is_th_dom = true;
+    end
+    
+    ori = app.DropDown_InitOri.Value;
+    if contains(ori, 'X')
+        if contains(ori, '-'); ph_xz = 180; else; ph_xz = 0; end
+        if is_th_dom    e_p = {'Theta Cut', ph_xz}; h_p = {'Phi Cut', 90};
+        else            e_p = {'Phi Cut', 90}; h_p = {'Theta Cut', ph_xz};
+        end
+    elseif contains(ori, 'Y')
+        if contains(ori, '-'); ph_yz = 270; else; ph_yz = 90; end
+        if is_th_dom
+            e_p = {'Theta Cut', ph_yz}; h_p = {'Phi Cut', 90};
+        else
+            e_p = {'Phi Cut', 90}; h_p = {'Theta Cut', ph_yz};
+        end
+    else
+        % Zenith default natively - Sweep Theta while holding Phi constant
+        if is_th_dom
+            e_p = {'Theta Cut', 0}; h_p = {'Theta Cut', 90};
+        else
+            e_p = {'Theta Cut', 90}; h_p = {'Theta Cut', 0};
+        end
+    end
+    
+    % Apply bounded assignments
+    if strcmp(mode, 'Auto E-Plane')
+        app.DropDown_CutType.Value = e_p{1};
+        app.Input_Cut_Value.Value = e_p{2};
+    else
+        app.DropDown_CutType.Value = h_p{1};
+        app.Input_Cut_Value.Value = h_p{2};
+    end
+    
+    app.DropDown_CutType.Enable = 'off';
+    app.Input_Cut_Value.Enable = 'off';
+    
+    % Dynamic plot transition natively
+    app.updateCutPlotsEvent([]);
+end

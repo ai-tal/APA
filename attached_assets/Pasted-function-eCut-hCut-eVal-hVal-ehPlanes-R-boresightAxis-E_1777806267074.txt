@@ -1,0 +1,40 @@
+function [eCut, hCut, eVal, hVal] = ehPlanes(R, boresightAxis)
+    % EHPLANES Resolve the E-Plane and H-Plane principal cuts for
+    % a processed pattern R, given the dominant boresight axis
+    % (one of '+X','-X','+Y','-Y','+Z','-Z').
+    %
+    % Output convention (matches plt.getCut):
+    %   'Phi Cut'   - FIX theta = val, SWEEP phi.  This is a
+    %                 circle of latitude (a great circle only
+    %                 when val == 90 deg, i.e. the equator).
+    %   'Theta Cut' - FIX phi   = val, SWEEP theta. This is a
+    %                 meridian / great circle through the poles.
+    %
+    % Geometric identification of E vs H:
+    %   At the peak direction, the unit vector theta_hat is
+    %   tangent to the meridian (along increasing theta), and
+    %   phi_hat is perpendicular to it (along increasing phi).
+    %     |E_theta| > |E_phi|  =>  E aligned with meridian
+    %                              => E-Plane = meridian.
+    %     |E_phi|   > |E_theta|=>  E perpendicular to meridian
+    %                              => E-Plane = the other plane
+    %                                 (perpendicular great circle).
+    %
+    % Principal great-circle pair per boresight axis:
+    %   +-Z  : two orthogonal meridians (Theta Cut at phi=phiM
+    %          and Theta Cut at phi=phiM+90).
+    %   +-X  : meridian at phi=0/180 (xz-plane) AND equator
+    %          (Phi Cut at theta=90, the xy-plane).
+    %   +-Y  : meridian at phi=90/270 (yz-plane) AND equator
+    %          (Phi Cut at theta=90).
+
+    eCut = 'Theta Cut'; hCut = 'Phi Cut';
+    eVal = 0;            hVal = 90;
+    if isempty(R) || ~isfield(R,'maxGain_dir'); return; end
+    if nargin < 2 || isempty(boresightAxis); boresightAxis = '+Z'; end
+
+    % ---- Peak direction (theta, phi) is used ONLY to sample
+    % which E-component dominates; the cut PLANES themselves
+    % are determined by the boresight axis.
+    peakTheta = R.maxGain_dir(1);   %#ok<NASGU>
+    peakPhi   = R.maxGain_dir(2);
