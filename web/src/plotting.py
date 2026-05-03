@@ -197,6 +197,7 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
     fig = go.Figure(go.Heatmap(
         x=pv, y=R.theta_vec, z=gw,
         zmin=cmin, zmax=cmax, colorscale=cs,
+        zsmooth='best',
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         hovertemplate='φ=%{x:.1f}°  θ=%{y:.1f}°  ' + label + '=%{z:.2f}<extra></extra>',
     ))
