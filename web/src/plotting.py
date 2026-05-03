@@ -14,6 +14,14 @@ _PAPER      = '#16213e'
 _FONT_COLOR = '#e0e0e0'
 _GRID_COLOR = '#334466'
 
+# Fixed per-component colours (Total=blue, RHCP=red, LHCP=green) — preserved across all cut plots
+_COMP_STYLES = {
+    'Total Gain': dict(color='#4fc3f7', dash='solid', short='Total'),
+    'RHCP Gain':  dict(color='#ef5350', dash='dash',  short='RHCP'),
+    'LHCP Gain':  dict(color='#66bb6a', dash='dot',   short='LHCP'),
+}
+_ALL_COMPS = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
+
 _LAYOUT_BASE = dict(
     paper_bgcolor=_PAPER,
     plot_bgcolor=_BG,
@@ -153,46 +161,46 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Polar cut — single 1-D Scatterpolar trace
+# Polar cut — supports single component, list of components, or 'All'
 # ─────────────────────────────────────────────────────────────────────────────
+def _resolve_comps(component):
+    """Normalise component arg → list of component name strings."""
+    if component == 'All' or component is None:
+        return _ALL_COMPS
+    if isinstance(component, (list, tuple)):
+        comps = [c for c in _ALL_COMPS if c in component]
+        return comps if comps else _ALL_COMPS
+    return [component] if component in _COMP_STYLES else _ALL_COMPS
+
+
 def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
-                   cut_value: float = 0.0, component: str = 'Total Gain',
+                   cut_value: float = 0.0, component='Total Gain',
                    cmin: float = None, cmax: float = None,
                    show_hpbw: bool = False) -> go.Figure:
     if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
     if cmin is None: cmin = cmax - 50
 
-    angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, component)
+    angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, 'Total Gain')
     comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
     shift     = -cmin
     tick_max  = int(cmax - cmin) + 10
     tick_vals = list(range(0, tick_max, 10))
     tick_text = [f'{v + cmin:.0f}' for v in tick_vals]
+    comps     = _resolve_comps(component)
 
     fig = go.Figure()
-
-    # 'All' → overlay Total, RHCP, LHCP on same polar axes
-    if component == 'All':
-        _cols  = ['#4fc3f7', '#ef5350', '#66bb6a']
-        _names = ['Total', 'RHCP', 'LHCP']
-        for G, nm, col in zip([G_tot, G_R, G_L], _names, _cols):
-            r_v = np.clip(G, cmin, cmax) + shift
-            fig.add_trace(go.Scatterpolar(
-                r=r_v, theta=angles, mode='lines',
-                line=dict(color=col, width=2), name=nm,
-                hovertemplate='%{theta:.1f}°: %{customdata:.2f} dB<extra></extra>',
-                customdata=G,
-            ))
-        G_plot = G_tot   # use Total for HPBW
-    else:
-        G_plot = comp_data.get(component, G_tot)
-        r_vals = np.clip(G_plot, cmin, cmax) + shift
+    for comp_name in comps:
+        st  = _COMP_STYLES[comp_name]
+        G   = comp_data[comp_name]
+        r_v = np.clip(G, cmin, cmax) + shift
         fig.add_trace(go.Scatterpolar(
-            r=r_vals, theta=angles, mode='lines',
-            line=dict(color='#4fc3f7', width=2), name=component,
+            r=r_v, theta=angles, mode='lines',
+            line=dict(color=st['color'], width=2), name=st['short'],
             hovertemplate='%{theta:.1f}°: %{customdata:.2f} dB<extra></extra>',
-            customdata=G_plot,
+            customdata=G,
         ))
+
+    G_plot = comp_data.get(comps[0], G_tot)   # first selected for HPBW
 
     if show_hpbw:
         crossings, _ = _find_hpbw_crossings(angles, G_plot)
@@ -212,9 +220,10 @@ def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
                 xref='paper', yref='paper', x=0.5, y=1.04,
                 showarrow=False, font=dict(color='#ffd600', size=11))
 
+    comp_label = '+'.join(_COMP_STYLES[c]['short'] for c in comps)
     fig.update_layout(
         **_LAYOUT_BASE,
-        title=dict(text=f'Polar Cut — {cut_type} @ {cut_value:.1f}°  [{component}]',
+        title=dict(text=f'Polar Cut — {cut_type} @ {cut_value:.1f}°  [{comp_label}]',
                    font=dict(color=_FONT_COLOR)),
         polar=dict(
             bgcolor=_BG,
@@ -225,42 +234,43 @@ def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
                             gridcolor=_GRID_COLOR, tickfont=dict(color=_FONT_COLOR),
                             range=[0, cmax - cmin]),
         ),
+        showlegend=(len(comps) > 1),
+        legend=dict(font=dict(color=_FONT_COLOR), bgcolor='rgba(0,0,0,0.3)'),
     )
     return fig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Rectangular cut
+# Rectangular cut — supports single component, list, or 'All'
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
-                  cut_value: float = 0.0, component: str = 'All',
+                  cut_value: float = 0.0, component='All',
                   cmin: float = None, cmax: float = None,
                   show_hpbw: bool = False) -> go.Figure:
     if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
     if cmin is None: cmin = cmax - 50
 
     angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, 'Total Gain')
-    x_label = ('θ (deg) — full 360° cut' if cut_type == 'Theta Cut' else 'φ (deg)')
-
-    comp_map = {'Total Gain': [(G_tot, 'Total', '#4fc3f7', 'solid')],
-                'RHCP Gain':  [(G_R,   'RHCP',  '#ef5350', 'dash')],
-                'LHCP Gain':  [(G_L,   'LHCP',  '#66bb6a', 'dot')],
-                'All':        [(G_tot, 'Total', '#4fc3f7', 'solid'),
-                               (G_R,   'RHCP',  '#ef5350', 'dash'),
-                               (G_L,   'LHCP',  '#66bb6a', 'dot')]}
-    traces = comp_map.get(component, comp_map['All'])
+    comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
+    x_label   = ('θ (deg) — full 360° cut' if cut_type == 'Theta Cut' else 'φ (deg)')
+    comps     = _resolve_comps(component)
 
     fig = go.Figure()
-    for G, nm, col, dash in traces:
-        fig.add_trace(go.Scatter(x=angles, y=G, mode='lines', name=nm,
-                                 line=dict(color=col, width=2, dash=dash)))
+    for comp_name in comps:
+        st = _COMP_STYLES[comp_name]
+        G  = comp_data[comp_name]
+        fig.add_trace(go.Scatter(
+            x=angles, y=G, mode='lines', name=st['short'],
+            line=dict(color=st['color'], width=2, dash=st['dash']),
+        ))
 
     if show_hpbw and len(G_tot) > 2:
-        peak = float(G_tot.max())
-        half = peak - 3.0
+        G_ref = comp_data.get(comps[0], G_tot)
+        peak  = float(G_ref.max())
+        half  = peak - 3.0
         fig.add_hline(y=half, line=dict(color='#ffd600', dash='dot', width=1.5),
                       annotation_text='−3 dB', annotation_font_color='#ffd600')
-        crossings, _ = _find_hpbw_crossings(angles, G_tot)
+        crossings, _ = _find_hpbw_crossings(angles, G_ref)
         for ang in crossings:
             fig.add_vline(x=ang, line=dict(color='#ffd600', dash='dash', width=1.2))
         if len(crossings) >= 2:
@@ -271,10 +281,12 @@ def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
                 xref='paper', yref='paper', x=0.5, y=1.05,
                 showarrow=False, font=dict(color='#ffd600', size=11))
 
+    comp_label = '+'.join(_COMP_STYLES[c]['short'] for c in comps)
     _ticks30 = list(range(0, 361, 30))
     fig.update_layout(
         **_LAYOUT_BASE,
-        title=dict(text=f'Rect Cut — {cut_type} @ {cut_value:.1f}°', font=dict(color=_FONT_COLOR)),
+        title=dict(text=f'Rect Cut — {cut_type} @ {cut_value:.1f}°  [{comp_label}]',
+                   font=dict(color=_FONT_COLOR)),
         xaxis=_axis_style(
             title=x_label,
             range=[0, 360],
@@ -452,19 +464,6 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
             + label + '=%{customdata[2]:.2f}<extra></extra>'
         ),
     ))
-    # Invisible Scatter3d overlay: gives hover on ALL surface points regardless
-    # of camera orientation (Surface traces miss back-facing cells).
-    fig.add_trace(go.Scatter3d(
-        x=X.ravel(), y=Y.ravel(), z=Z.ravel(),
-        mode='markers',
-        marker=dict(size=2, opacity=0.01, color='rgba(0,0,0,0)'),
-        customdata=cd.reshape(-1, 3),
-        hovertemplate=(
-            'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
-            + label + '=%{customdata[2]:.2f}<extra></extra>'
-        ),
-        showlegend=False, name='',
-    ))
     for ax in _xyz_axes(r_max * 1.25):
         fig.add_trace(ax)
 
@@ -513,17 +512,6 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
             'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
             + label + '=%{customdata[2]:.2f}<extra></extra>'
         ),
-    ))
-    fig.add_trace(go.Scatter3d(
-        x=X.ravel(), y=Y.ravel(), z=Z.ravel(),
-        mode='markers',
-        marker=dict(size=2, opacity=0.01, color='rgba(0,0,0,0)'),
-        customdata=cd.reshape(-1, 3),
-        hovertemplate=(
-            'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
-            + label + '=%{customdata[2]:.2f}<extra></extra>'
-        ),
-        showlegend=False, name='',
     ))
     for ax in _xyz_axes(1.35):
         fig.add_trace(ax)

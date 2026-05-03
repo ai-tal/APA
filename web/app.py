@@ -136,29 +136,102 @@ def main_page():
     # Light mode: JS MutationObserver rewrites every inline style that uses dark colours.
     # CSS class selectors can't override inline styles reliably, so we patch the DOM directly.
     ui.add_head_html('''<style>
-/* Base Quasar component overrides for light mode */
-.body--light .q-header  { background:#ffffff !important; border-color:#d0d7de !important; }
-.body--light .q-tabs    { background:#f0f2f5 !important; border-color:#d0d7de !important; }
+/* ═══════════════════════════════════════════════════════
+   LIGHT MODE — comprehensive Quasar + inline overrides
+   ═══════════════════════════════════════════════════════ */
+
+/* Page / layout */
+.body--light { background:#f5f7fa !important; color:#24292f !important; }
+.body--light .q-page { background:#f5f7fa !important; }
+.body--light .q-header { background:#ffffff !important; border-color:#d0d7de !important; }
+.body--light .q-footer { background:#ffffff !important; }
+.body--light .q-drawer { background:#ffffff !important; }
+
+/* Tabs */
+.body--light .q-tabs { background:#f0f2f5 !important; }
+.body--light .q-tab  { color:#57606a !important; }
+.body--light .q-tab--active { color:#0969da !important; }
+.body--light .q-tab__indicator { background:#0969da !important; }
 .body--light .q-tab-panels,
 .body--light .q-tab-panel { background:#f5f7fa !important; }
 .body--light .q-separator { background:#d0d7de !important; }
-.body--light .q-item__label--caption   { color:#57606a !important; }
-.body--light .q-item__label            { color:#24292f !important; }
-.body--light .q-table th,
-.body--light .q-table td { background:#ffffff !important; color:#24292f !important; border-color:#d0d7de !important; }
-.body--light .q-field__control { border-color:#d0d7de !important; }
+
+/* ── Form fields (including those created with dark prop) ── */
+.body--light .q-field--dark .q-field__control,
+.body--light .q-field .q-field__control {
+  background:#ffffff !important;
+}
+.body--light .q-field--outlined.q-field--dark .q-field__control:before,
+.body--light .q-field--outlined .q-field__control:before {
+  border-color:#d0d7de !important;
+}
+.body--light .q-field--dark .q-field__native,
+.body--light .q-field--dark .q-field__input,
+.body--light .q-field--dark .q-field__label,
+.body--light .q-field--dark .q-field__marginal,
+.body--light .q-field--dark .q-field__bottom,
 .body--light .q-field__native,
-.body--light .q-field__label  { color:#24292f !important; }
-.body--light .q-uploader       { background:#f0f2f5 !important; color:#24292f !important; }
-.body--light ::-webkit-scrollbar-thumb { background:#adb5bd; }
+.body--light .q-field__input,
+.body--light .q-field__label { color:#24292f !important; }
+.body--light .q-field--dark .q-select__dropdown-icon,
+.body--light .q-select__dropdown-icon { color:#57606a !important; }
+.body--light .q-chip { background:#e0e5eb !important; color:#24292f !important; }
+.body--light .q-chip__icon { color:#57606a !important; }
+
+/* Select / dropdown menus */
+.body--light .q-menu { background:#ffffff !important; color:#24292f !important; border:1px solid #d0d7de; }
+.body--light .q-item  { color:#24292f !important; }
+.body--light .q-item:hover { background:#f0f2f5 !important; }
+.body--light .q-item__label { color:#24292f !important; }
+.body--light .q-item__label--caption { color:#57606a !important; }
+.body--light .q-list { background:transparent !important; }
+
+/* Tables */
+.body--light .q-table { color:#24292f !important; }
+.body--light .q-table__top,
+.body--light .q-table__bottom { background:#f0f2f5 !important; color:#24292f !important; }
+.body--light .q-table thead tr,
+.body--light .q-table thead th {
+  background:#e6eaef !important;
+  color:#24292f !important;
+  border-color:#d0d7de !important;
+}
+.body--light .q-table tbody tr:nth-child(odd)  td { background:#ffffff !important; }
+.body--light .q-table tbody tr:nth-child(even) td { background:#f5f7fa !important; }
+.body--light .q-table tbody td { color:#24292f !important; border-color:#d0d7de !important; }
+.body--light .q-table--dark { color:#24292f !important; }
+
+/* Scrollbar */
+.body--light ::-webkit-scrollbar-thumb { background:#adb5bd; border-radius:4px; }
 .body--light ::-webkit-scrollbar-track { background:#e9ecef; }
+
+/* Uploader */
+.body--light .q-uploader { background:#f0f2f5 !important; color:#24292f !important; }
+.body--light .q-uploader__header { background:#e2e8ef !important; }
+
+/* Checkbox & Radio */
+.body--light .q-checkbox__label,
+.body--light .q-radio__label   { color:#24292f !important; }
+.body--light .q-checkbox__bg   { border-color:#57606a !important; }
+
+/* Buttons */
+.body--light .q-btn--flat { color:#0969da !important; }
+
+/* Notifications */
+.body--light .q-notification { background:#ffffff !important; color:#24292f !important;
+  border:1px solid #d0d7de; box-shadow:0 2px 8px rgba(0,0,0,0.12); }
+
+/* Scroll area */
+.body--light .q-scrollarea { background:transparent !important; }
 </style>
 <script>
-/* Inline-style colour swap: dark ↔ light                                   */
-/* NiceGUI bakes colours into style="..." attributes which CSS cannot         */
-/* override without !important on the exact attribute value. JS is reliable. */
+/* ────────────────────────────────────────────────────────────────────────
+   Inline-style colour swap: dark ↔ light
+   NiceGUI bakes colours into style="" attributes which CSS !important
+   cannot reliably override, so we patch the DOM directly.
+   ──────────────────────────────────────────────────────────────────────── */
 window._apaLight = false;
-/* Dark → Light colour pairs (also used to update Plotly bgcolor strings) */
+/* Dark → Light colour pairs */
 const _D2L = [
   ['#161b22','#ffffff'], ['#16213e','#e8ecf0'], ['#0d1117','#f5f7fa'],
   ['#1a1a2e','#f0f2f5'], ['#30363d','#d0d7de'], ['#8b949e','#57606a'],
@@ -169,31 +242,45 @@ const _L2D = _D2L.map(([d,l]) => [l,d]);
 
 function _apaSwap(el, pairs) {
   const s = el.getAttribute('style'); if (!s) return;
-  let ns = s.toLowerCase();  // normalise for matching
-  let orig = s;
-  pairs.forEach(([a,b]) => { ns = ns.split(a.toLowerCase()).join(b); });
-  // Rebuild: replace in original case-insensitively
-  let result = orig;
+  let result = s;
   pairs.forEach(([a,b]) => {
-    const re = new RegExp(a.replace('#','\\#'), 'gi');
+    const re = new RegExp(a.replace(/[#]/g,'\\$&'), 'gi');
     result = result.replace(re, b);
   });
-  if (result !== orig) el.setAttribute('style', result);
+  if (result !== s) el.setAttribute('style', result);
 }
-
 function _apaPatchAll(pairs) {
   document.querySelectorAll('[style]').forEach(el => _apaSwap(el, pairs));
 }
-
 function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
   if (typeof Plotly === 'undefined') return;
   document.querySelectorAll('.js-plotly-plot').forEach(div => {
-    try { Plotly.relayout(div, {
-      paper_bgcolor: bgPaper, plot_bgcolor: bgPlot, 'font.color': fontColor
-    }); } catch(e) {}
+    try {
+      Plotly.relayout(div, {
+        paper_bgcolor: bgPaper,
+        plot_bgcolor:  bgPlot,
+        'font.color':  fontColor,
+        'title.font.color': fontColor,
+        'scene.bgcolor': bgPlot,
+        'polar.bgcolor': bgPlot,
+        'polar.angularaxis.tickcolor': fontColor,
+        'polar.angularaxis.tickfont.color': fontColor,
+        'polar.radialaxis.tickfont.color': fontColor,
+        'polar.radialaxis.gridcolor': bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
+        'xaxis.gridcolor':  bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
+        'yaxis.gridcolor':  bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
+        'xaxis.zerolinecolor': bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
+        'yaxis.zerolinecolor': bgPaper === '#e8ecf0' ? '#c0c8d8' : '#334466',
+        'xaxis.tickfont.color': fontColor,
+        'yaxis.tickfont.color': fontColor,
+        'xaxis.title.font.color': fontColor,
+        'yaxis.title.font.color': fontColor,
+        'legend.font.color': fontColor,
+        'legend.bgcolor': bgPaper === '#e8ecf0' ? 'rgba(240,242,245,0.85)' : 'rgba(0,0,0,0.3)',
+      });
+    } catch(e) {}
   });
 }
-
 function _apaToLight() {
   window._apaLight = true;
   _apaPatchAll(_D2L);
@@ -201,7 +288,6 @@ function _apaToLight() {
   document.body.style.color      = '#24292f';
   _apaRelayoutPlotly('#e8ecf0', '#f0f2f5', '#24292f');
 }
-
 function _apaToDark() {
   window._apaLight = false;
   _apaPatchAll(_L2D);
@@ -209,7 +295,6 @@ function _apaToDark() {
   document.body.style.color      = '#e0e0e0';
   _apaRelayoutPlotly('#16213e', '#1a1a2e', '#e0e0e0');
 }
-
 /* MutationObserver: auto-patch newly added nodes when in light mode */
 new MutationObserver(muts => {
   if (!window._apaLight) return;
@@ -441,9 +526,11 @@ def _build_single_tab():
                     'dense dark outlined').style('min-width:106px')
                 cut_val  = ui.number('Cut Value (°)', value=0.0, format='%.1f').props(
                     'dense dark outlined').style('min-width:106px')
-                _CUT_COMPS = ['All', 'Total Gain', 'RHCP Gain', 'LHCP Gain']
-                cut_comp = ui.select(_CUT_COMPS, value='All', label='Cut Component').props(
-                    'dense dark outlined').style('min-width:130px')
+                _CUT_COMPS = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
+                cut_comp = ui.select(
+                    _CUT_COMPS, value=_CUT_COMPS, multiple=True,
+                    label='Cut Components').props(
+                    'dense dark outlined use-chips').style('min-width:160px')
                 cmin_inp = ui.number('Cmin (dB)', value=-50.0, format='%.0f').props(
                     'dense dark outlined').style('min-width:88px')
                 cmax_inp = ui.number('Cmax (dB)', value=0.0,   format='%.0f').props(
@@ -501,37 +588,57 @@ def _build_single_tab():
                     'background:#0d1117'):
 
                 with ui.tab_panel(dt_in):
+                    with ui.row().classes('w-full items-center gap-2').style('padding:4px 0'):
+                        tbl_in_filter = ui.input(
+                            placeholder='Filter rows…').props(
+                            'dense dark outlined clearable').style(
+                            'flex:1; max-width:260px')
+                        lbl_in_count = ui.label('').style('color:#8b949e; font-size:0.75rem')
+                    _IN_COLS = [
+                        {'name': 'row_num', 'label': '#',        'field': 'row_num', 'align': 'right',  'style': 'width:46px; color:#57606a'},
+                        {'name': 'theta',   'label': 'θ (°)',    'field': 'theta',   'sortable': True},
+                        {'name': 'phi',     'label': 'φ (°)',    'field': 'phi',     'sortable': True},
+                        {'name': 'gth',     'label': '|Eθ| dB', 'field': 'gth',     'sortable': True},
+                        {'name': 'gph',     'label': '|Eφ| dB', 'field': 'gph',     'sortable': True},
+                        {'name': 'pth',     'label': '∠Eθ (°)', 'field': 'pth'},
+                        {'name': 'pph',     'label': '∠Eφ (°)', 'field': 'pph'},
+                    ]
                     tbl_in = ui.table(
-                        columns=[
-                            {'name': 'theta', 'label': 'θ (°)',   'field': 'theta', 'sortable': True},
-                            {'name': 'phi',   'label': 'φ (°)',   'field': 'phi',   'sortable': True},
-                            {'name': 'gth',   'label': '|Eθ| dB', 'field': 'gth'},
-                            {'name': 'gph',   'label': '|Eφ| dB', 'field': 'gph'},
-                            {'name': 'pth',   'label': '∠Eθ (°)', 'field': 'pth'},
-                            {'name': 'pph',   'label': '∠Eφ (°)', 'field': 'pph'},
-                        ],
-                        rows=[], row_key='theta',
-                    ).props('dense dark flat virtual-scroll').style(
-                        'max-height:220px').classes('w-full')
+                        columns=_IN_COLS, rows=[], row_key='row_num',
+                    ).props('dense dark flat virtual-scroll sticky-header').style(
+                        'max-height:240px').classes('w-full')
+                    tbl_in_filter.on('update:model-value',
+                        lambda e, t=tbl_in: t.props(f'filter="{e.args or ""}"'))
 
                 with ui.tab_panel(dt_data):
+                    with ui.row().classes('w-full items-center gap-2').style('padding:4px 0'):
+                        tbl_data_filter = ui.input(
+                            placeholder='Filter rows…').props(
+                            'dense dark outlined clearable').style(
+                            'flex:1; max-width:260px')
+                        lbl_data_count = ui.label('').style('color:#8b949e; font-size:0.75rem')
+                    _DATA_COLS = [
+                        {'name': 'row_num', 'label': '#',              'field': 'row_num', 'align': 'right', 'style': 'width:46px; color:#57606a'},
+                        {'name': 'theta',   'label': 'θ (°)',          'field': 'theta',   'sortable': True},
+                        {'name': 'phi',     'label': 'φ (°)',          'field': 'phi',     'sortable': True},
+                        {'name': 'gtot',    'label': 'G_tot (dBi)',    'field': 'gtot',    'sortable': True},
+                        {'name': 'grhcp',   'label': 'G_RHCP (dBic)', 'field': 'grhcp',   'sortable': True},
+                        {'name': 'glhcp',   'label': 'G_LHCP (dBic)', 'field': 'glhcp',   'sortable': True},
+                        {'name': 'ar',      'label': 'AR (dB)',        'field': 'ar',      'sortable': True},
+                        {'name': 'plf',     'label': 'PLF (dB)',       'field': 'plf',     'sortable': True},
+                        {'name': 'eirp',    'label': 'EIRP (dBW)',     'field': 'eirp',    'sortable': True},
+                    ]
                     tbl_data = ui.table(
-                        columns=[
-                            {'name': 'theta', 'label': 'θ (°)',         'field': 'theta', 'sortable': True},
-                            {'name': 'phi',   'label': 'φ (°)',         'field': 'phi',   'sortable': True},
-                            {'name': 'gtot',  'label': 'G_tot (dBi)',   'field': 'gtot',  'sortable': True},
-                            {'name': 'grhcp', 'label': 'G_RHCP (dBic)', 'field': 'grhcp'},
-                            {'name': 'glhcp', 'label': 'G_LHCP (dBic)', 'field': 'glhcp'},
-                            {'name': 'ar',    'label': 'AR (dB)',        'field': 'ar'},
-                            {'name': 'plf',   'label': 'PLF (dB)',       'field': 'plf'},
-                            {'name': 'eirp',  'label': 'EIRP (dBW)',     'field': 'eirp'},
-                        ],
-                        rows=[], row_key='theta',
-                    ).props('dense dark flat virtual-scroll').style(
-                        'max-height:220px').classes('w-full')
+                        columns=_DATA_COLS, rows=[], row_key='row_num',
+                    ).props('dense dark flat virtual-scroll sticky-header').style(
+                        'max-height:240px').classes('w-full')
+                    tbl_data_filter.on('update:model-value',
+                        lambda e, t=tbl_data: t.props(f'filter="{e.args or ""}"'))
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
             tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
+            # Store count labels in plot_refs so _do_process_single can update them
+            plot_refs.update(lbl_in_count=lbl_in_count, lbl_data_count=lbl_data_count)
 
 
 # ── Single-tab callbacks ──────────────────────────────────────────────────────
@@ -590,28 +697,29 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         fb = f'   FBR={R.fbr_dB:.1f} dB' if R.fbr_dB else ''
         lbl_hpbw.set_text(f'HPBW  E:{he}  H:{hh}{fb}')
 
-        MAX = 2000
         n   = len(P.theta)
-        idx = np.arange(min(n, MAX))
+        idx = np.arange(n)
 
-        # ── Input data table ──────────────────────────────────────────────
-        Gth = 20 * np.log10(np.abs(P.Eth[idx]) + 1e-30)
-        Gph = 20 * np.log10(np.abs(P.Eph[idx]) + 1e-30)
-        pth = np.angle(P.Eth[idx], deg=True)
-        pph = np.angle(P.Eph[idx], deg=True)
+        # ── Input data table — ALL rows ────────────────────────────────────
+        Gth = 20 * np.log10(np.abs(P.Eth) + 1e-30)
+        Gph = 20 * np.log10(np.abs(P.Eph) + 1e-30)
+        pth = np.angle(P.Eth, deg=True)
+        pph = np.angle(P.Eph, deg=True)
         tbl_in.rows = [
-            dict(theta=f'{P.theta[i]:.2f}', phi=f'{P.phi[i]:.2f}',
-                 gth=f'{Gth[k]:.3f}', gph=f'{Gph[k]:.3f}',
-                 pth=f'{pth[k]:.2f}', pph=f'{pph[k]:.2f}')
-            for k, i in enumerate(idx)
+            dict(row_num=str(i + 1),
+                 theta=f'{P.theta[i]:.2f}', phi=f'{P.phi[i]:.2f}',
+                 gth=f'{Gth[i]:.3f}', gph=f'{Gph[i]:.3f}',
+                 pth=f'{pth[i]:.2f}', pph=f'{pph[i]:.2f}')
+            for i in idx
         ]
         tbl_in.update()
-        if n > MAX:
-            _notify(f'Input table: showing first {MAX} of {n} rows.', 'info')
+        if plot_refs.get('lbl_in_count') is not None:
+            plot_refs['lbl_in_count'].set_text(f'{n:,} rows')
 
-        # ── Output data table (processed per-point) ───────────────────────
+        # ── Output data table — ALL rows ────────────────────────────────────
         tbl_data.rows = [
-            dict(theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
+            dict(row_num=str(i + 1),
+                 theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
                  gtot=f'{R.G_total_dB[i]:.3f}',
                  grhcp=f'{R.G_RHCP_dB[i]:.3f}',
                  glhcp=f'{R.G_LHCP_dB[i]:.3f}',
@@ -621,6 +729,8 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in idx
         ]
         tbl_data.update()
+        if plot_refs.get('lbl_data_count') is not None:
+            plot_refs['lbl_data_count'].set_text(f'{n:,} rows')
 
         # ── Output metrics table ──────────────────────────────────────────
         tbl_out.rows = [{'metric': r[0], 'value': r[1]} for r in R.table_rows]
@@ -645,7 +755,10 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
     R = _state['R_single']
     if R is None: return
     try:
-        cc = cut_comp.value if cut_comp is not None else 'All'
+        # Multi-select value is a list; fall back to all 3 if empty
+        cc = cut_comp.value if cut_comp is not None else ['Total Gain', 'RHCP Gain', 'LHCP Gain']
+        if isinstance(cc, list) and len(cc) == 0:
+            cc = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
         fig = _render_plot(
             R, plot_type=plot_dd.value, component=comp_dd.value,
             cut_type=cut_type.value, cut_value=float(cut_val.value),
@@ -765,18 +878,38 @@ def _build_batch_tab():
         for ent in _state['batch_entries']:
             icon = '✅' if ent.get('ok') else ('❌' if ent.get('err') else '⏳')
             with lst:
-                with ui.item().props('clickable').on(
-                        'click', lambda _, e=ent: _select_entry(e, refs)):
-                    with ui.item_section():
-                        ui.item_label(f'{icon} {ent["name"]}')
+                with ui.row().classes('w-full items-center gap-1').style(
+                        'padding:4px 6px; flex-wrap:nowrap'):
+                    with ui.column().classes('flex-1').style('gap:1px; cursor:pointer; overflow:hidden').on(
+                            'click', lambda _, e=ent: _select_entry(e, refs)):
+                        name_lbl = ui.label(f'{icon} {ent["name"]}').style(
+                            'font-size:0.82rem; color:#e0e0e0; '
+                            'overflow:hidden; text-overflow:ellipsis; white-space:nowrap')
                         if ent.get('ok') and ent.get('R'):
                             R = ent['R']
-                            ui.item_label(
+                            ui.label(
                                 f'Peak {R.max_gain_dB:.2f} dBi  •  {R.dominant_pol}'
-                            ).props('caption')
+                            ).style('font-size:0.72rem; color:#8b949e')
                         elif ent.get('err'):
-                            ui.item_label(ent['err'][:80]).props('caption').style(
-                                'color:#ef5350')
+                            ui.label(ent['err'][:80]).style('font-size:0.72rem; color:#ef5350')
+
+                    def _batch_rename(e=ent, lbl=name_lbl, icon_str=icon):
+                        with ui.dialog() as dlg, ui.card().style(
+                                'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
+                            ui.label('Rename Pattern').style(
+                                'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                            inp = ui.input(value=e['name']).props(
+                                'dense dark outlined').classes('w-full').style('min-width:240px')
+                            with ui.row().classes('gap-1'):
+                                def _save(entry=e, label=lbl, d=dlg, inpt=inp, ic=icon_str):
+                                    v = inpt.value.strip()
+                                    if v: entry['name'] = v; label.set_text(f'{ic} {v}')
+                                    d.close()
+                                ui.button('Save',   on_click=_save).props('flat color=blue size=sm')
+                                ui.button('Cancel', on_click=dlg.close).props('flat color=grey size=sm')
+                        dlg.open()
+                    ui.button(icon='edit', on_click=_batch_rename).props(
+                        'flat round dense size=xs').style('color:#8b949e; flex-shrink:0')
 
     def _refresh_batch_summary(plt_el):
         ok = [e for e in _state['batch_entries'] if e.get('ok') and e.get('R')]
@@ -931,16 +1064,34 @@ def _build_coverage_tab():
             with ui.row().classes('w-full items-center gap-1').style('flex-wrap:nowrap'):
                 def _on_cov_cb_change(e, p=pat_entry):
                     p.update({'enabled': e.value})
-                    _refresh_cov_plot()   # live-filter results on check/uncheck
+                    _refresh_cov_plot()
                 cb = ui.checkbox(
                     value=pat_entry.get('enabled', True),
                     on_change=_on_cov_cb_change,
                 ).props('dark color=blue size=xs')
-                ui.label(pat_entry['name']).style(
+                name_lbl = ui.label(pat_entry['name']).style(
                     'font-size:0.8rem; color:#e0e0e0; flex:1; '
                     'overflow:hidden; text-overflow:ellipsis')
                 ui.label(f'{pat_entry["R"].max_gain_dB:.1f} dBi').style(
                     'font-size:0.75rem; color:#8b949e; white-space:nowrap')
+
+                def _cov_rename(p=pat_entry, lbl=name_lbl):
+                    with ui.dialog() as dlg, ui.card().style(
+                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
+                        ui.label('Rename Pattern').style(
+                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                        inp = ui.input(value=p['name']).props(
+                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                        with ui.row().classes('gap-1'):
+                            def _save(entry=p, label=lbl, d=dlg, inpt=inp):
+                                v = inpt.value.strip()
+                                if v: entry['name'] = v; label.set_text(v)
+                                d.close()
+                            ui.button('Save',   on_click=_save).props('flat color=blue size=sm')
+                            ui.button('Cancel', on_click=dlg.close).props('flat color=grey size=sm')
+                    dlg.open()
+                ui.button(icon='edit', on_click=_cov_rename).props(
+                    'flat round dense size=xs').style('color:#8b949e; flex-shrink:0')
 
     def _refresh_cov_plot():
         all_runs = _state['cov_runs']
@@ -1007,11 +1158,28 @@ async def _on_cov_upload(e, lst_col, lbl, refresh_plot_fn):
                     p.update({'enabled': ev.value})
                     refresh_plot_fn()
                 cb = ui.checkbox(value=True, on_change=_cov_cb).props('dark color=blue size=xs')
-                ui.label(P.name).style(
+                name_lbl2 = ui.label(P.name).style(
                     'font-size:0.8rem; color:#e0e0e0; flex:1; '
                     'overflow:hidden; text-overflow:ellipsis')
                 ui.label(f'{R.max_gain_dB:.1f} dBi').style(
                     'font-size:0.75rem; color:#8b949e; white-space:nowrap')
+                def _cov_upload_rename(p=pat_entry, lbl=name_lbl2):
+                    with ui.dialog() as dlg, ui.card().style(
+                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
+                        ui.label('Rename Pattern').style(
+                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                        inp = ui.input(value=p['name']).props(
+                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                        with ui.row().classes('gap-1'):
+                            def _save(entry=p, label=lbl, d=dlg, inpt=inp):
+                                v = inpt.value.strip()
+                                if v: entry['name'] = v; label.set_text(v)
+                                d.close()
+                            ui.button('Save',   on_click=_save).props('flat color=blue size=sm')
+                            ui.button('Cancel', on_click=dlg.close).props('flat color=grey size=sm')
+                    dlg.open()
+                ui.button(icon='edit', on_click=_cov_upload_rename).props(
+                    'flat round dense size=xs').style('color:#8b949e; flex-shrink:0')
 
         _notify(f'Loaded {P.name}')
     except Exception as ex:
@@ -1274,12 +1442,32 @@ def _build_combine_tab():
     # Register a callback so Single tab "→ Combine" can add a row
     def _add_cmb_list_item(pat_entry):
         with cmb_list:
-            with ui.item():
-                with ui.item_section():
-                    ui.item_label(pat_entry['name'])
+            with ui.row().classes('w-full items-center gap-1').style(
+                    'padding:4px 6px; flex-wrap:nowrap'):
+                with ui.column().classes('flex-1').style('gap:1px; overflow:hidden'):
+                    cmb_name_lbl = ui.item_label(pat_entry['name']).style(
+                        'overflow:hidden; text-overflow:ellipsis; white-space:nowrap')
                     ui.item_label(
                         f'Peak {pat_entry["R"].max_gain_dB:.2f} dBi  •  {pat_entry["R"].dominant_pol}'
                     ).props('caption')
+
+                def _cmb_rename(p=pat_entry, lbl=cmb_name_lbl):
+                    with ui.dialog() as dlg, ui.card().style(
+                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
+                        ui.label('Rename Pattern').style(
+                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                        inp = ui.input(value=p['name']).props(
+                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                        with ui.row().classes('gap-1'):
+                            def _save(entry=p, label=lbl, d=dlg, inpt=inp):
+                                v = inpt.value.strip()
+                                if v: entry['name'] = v; label.set_text(v)
+                                d.close()
+                            ui.button('Save',   on_click=_save).props('flat color=blue size=sm')
+                            ui.button('Cancel', on_click=dlg.close).props('flat color=grey size=sm')
+                    dlg.open()
+                ui.button(icon='edit', on_click=_cmb_rename).props(
+                    'flat round dense size=xs').style('color:#8b949e; flex-shrink:0')
         lbl_cmb_n.set_text(f'{len(_state["cmb_patterns"])} pattern(s)')
         _rebuild_mask_rows()
         # Add subplot preview
@@ -1313,12 +1501,31 @@ async def _on_cmb_upload(e, lst, lbl, mask_col, mask_rows, cmb_refs, subplot_row
         lbl.set_text(f'{n} pattern(s)')
 
         with lst:
-            with ui.item():
-                with ui.item_section():
-                    ui.item_label(P.name)
+            with ui.row().classes('w-full items-center gap-1').style(
+                    'padding:4px 6px; flex-wrap:nowrap'):
+                with ui.column().classes('flex-1').style('gap:1px; overflow:hidden'):
+                    cmb_ul_lbl = ui.item_label(P.name).style(
+                        'overflow:hidden; text-overflow:ellipsis; white-space:nowrap')
                     ui.item_label(
                         f'Peak {R.max_gain_dB:.2f} dBi  •  {R.dominant_pol}'
                     ).props('caption')
+                def _cmb_ul_rename(p=pat_entry, lbl=cmb_ul_lbl):
+                    with ui.dialog() as dlg, ui.card().style(
+                            'background:#161b22; border:1px solid #30363d; padding:14px; gap:8px'):
+                        ui.label('Rename Pattern').style(
+                            'color:#e0e0e0; font-weight:600; font-size:0.9rem')
+                        inp = ui.input(value=p['name']).props(
+                            'dense dark outlined').classes('w-full').style('min-width:240px')
+                        with ui.row().classes('gap-1'):
+                            def _save(entry=p, label=lbl, d=dlg, inpt=inp):
+                                v = inpt.value.strip()
+                                if v: entry['name'] = v; label.set_text(v)
+                                d.close()
+                            ui.button('Save',   on_click=_save).props('flat color=blue size=sm')
+                            ui.button('Cancel', on_click=dlg.close).props('flat color=grey size=sm')
+                    dlg.open()
+                ui.button(icon='edit', on_click=_cmb_ul_rename).props(
+                    'flat round dense size=xs').style('color:#8b949e; flex-shrink:0')
 
         if cmb_refs.get('rebuild_mask_rows'):
             cmb_refs['rebuild_mask_rows']()
