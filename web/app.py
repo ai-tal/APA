@@ -117,7 +117,7 @@ def main_page():
         ui.label('📡 Antenna Pattern Analyzer').style(
             'font-size:1.3rem; font-weight:700; color:#58a6ff; letter-spacing:1px')
         ui.space()
-        ui.label('APAv01 · APA_v02 · APA_v03 → unified Python/NiceGUI').style(
+        ui.label('Dark/Light mode').style(
             'font-size:0.72rem; color:#8b949e')
 
     with ui.tabs().props('dense indicator-color=blue').classes('w-full').style(
