@@ -43,10 +43,10 @@ def _wrap_phi(R: ProcessedPattern, grid: np.ndarray):
     return pv_w, grid_w
 
 
-def _cut_full360(R, cut_type, cut_value, component):
+def _cut_full360(R, cut_type, cut_value, component='Total Gain'):
     """Return (angles, G_tot, G_R, G_L) for a full-360° cut.
-    For Theta Cut: stitches forward (phi) + mirror (phi+180) halves.
-    For Phi Cut:   just returns the standard phi sweep 0–360.
+    Theta Cut: stitches forward (phi) + mirror (phi+180) halves.
+    Phi Cut:   returns the standard theta sweep 0–180.
     """
     if cut_type == 'Theta Cut':
         a_f, Gt_f, Gr_f, Gl_f = get_cut(R, cut_type, cut_value)
@@ -59,6 +59,22 @@ def _cut_full360(R, cut_type, cut_value, component):
                 np.concatenate([Gl_f, Gl_m[::-1][1:]]))
     else:
         return get_cut(R, cut_type, cut_value)
+
+
+def _find_hpbw_crossings(angles: np.ndarray, G: np.ndarray):
+    """Return (crossings, r_cross) where crossings are angles at G_max−3 dB."""
+    if len(G) < 3:
+        return [], []
+    peak = float(G.max())
+    half = peak - 3.0
+    crossings, r_cross = [], []
+    for i in range(len(angles) - 1):
+        g0, g1 = float(G[i]), float(G[i + 1])
+        if (g0 >= half) != (g1 >= half):
+            frac = (half - g0) / (g1 - g0 + 1e-30)
+            crossings.append(float(angles[i]) + frac * float(angles[i + 1] - angles[i]))
+            r_cross.append(half)
+    return crossings, r_cross
 
 
 def _xyz_axes(r_scale: float, colorX='#ff4444', colorY='#44ff44', colorZ='#4fc3f7'):
@@ -89,13 +105,13 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
     if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
     if cmin is None: cmin = cmax - 50
 
-    pv, gw = _wrap_phi(R, grid)   # close the phi=360 seam
+    pv, gw = _wrap_phi(R, grid)
 
     fig = go.Figure(go.Heatmap(
         x=pv, y=R.theta_vec, z=gw,
         zmin=cmin, zmax=cmax, colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
-        hovertemplate='φ=%{x:.1f}°<br>θ=%{y:.1f}°<br>' + label + '=%{z:.2f}<extra></extra>',
+        hovertemplate='φ=%{x:.1f}°  θ=%{y:.1f}°  ' + label + '=%{z:.2f}<extra></extra>',
     ))
 
     if show_peak:
@@ -141,9 +157,11 @@ def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
     angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, component)
     comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
     G_plot    = comp_data.get(component, G_tot)
-    r_vals    = np.clip(G_plot, cmin, cmax) - cmin
+    shift     = -cmin
+    r_vals    = np.clip(G_plot, cmin, cmax) + shift
 
-    tick_vals = list(range(0, int(cmax - cmin) + 10, 10))
+    tick_max  = int(cmax - cmin) + 10
+    tick_vals = list(range(0, tick_max, 10))
     tick_text = [f'{v + cmin:.0f}' for v in tick_vals]
 
     fig = go.Figure(go.Scatterpolar(
@@ -152,9 +170,29 @@ def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
         hovertemplate='%{theta:.1f}°: %{customdata:.2f} dB<extra></extra>',
         customdata=G_plot,
     ))
+
+    if show_hpbw:
+        crossings, _ = _find_hpbw_crossings(angles, G_plot)
+        r_hpbw = float(np.clip(G_plot.max() - 3.0, cmin, cmax)) + shift
+        for ang in crossings:
+            fig.add_trace(go.Scatterpolar(
+                r=[0, r_hpbw], theta=[ang, ang],
+                mode='lines',
+                line=dict(color='#ffd600', dash='dash', width=1.5),
+                showlegend=False, hoverinfo='skip',
+            ))
+        if len(crossings) >= 2:
+            hpbw_val = abs(crossings[1] - crossings[0])
+            if hpbw_val > 180: hpbw_val = 360 - hpbw_val
+            fig.add_annotation(
+                text=f'HPBW ≈ {hpbw_val:.1f}°',
+                xref='paper', yref='paper', x=0.5, y=1.04,
+                showarrow=False, font=dict(color='#ffd600', size=11))
+
     fig.update_layout(
         **_LAYOUT_BASE,
-        title=dict(text=f'Polar Cut — {cut_type} @ {cut_value}°', font=dict(color=_FONT_COLOR)),
+        title=dict(text=f'Polar Cut — {cut_type} @ {cut_value:.1f}°  [{component}]',
+                   font=dict(color=_FONT_COLOR)),
         polar=dict(
             bgcolor=_BG,
             angularaxis=dict(tickcolor=_FONT_COLOR, gridcolor=_GRID_COLOR,
@@ -174,13 +212,12 @@ def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
 def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
                   cut_value: float = 0.0,
                   cmin: float = None, cmax: float = None,
-                  show_hpbw: bool = True) -> go.Figure:
+                  show_hpbw: bool = False) -> go.Figure:
     if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
     if cmin is None: cmin = cmax - 50
 
     angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, 'Total Gain')
-    x_label = ('θ (deg) — full 360° cut' if cut_type == 'Theta Cut'
-                else 'φ (deg)')
+    x_label = ('θ (deg) — full 360° cut' if cut_type == 'Theta Cut' else 'φ (deg)')
 
     fig = go.Figure()
     for G, nm, col, dash in [(G_tot, 'Total', '#4fc3f7', 'solid'),
@@ -190,13 +227,24 @@ def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
                                  line=dict(color=col, width=2, dash=dash)))
 
     if show_hpbw and len(G_tot) > 2:
-        half = float(G_tot.max()) - 3.0
-        fig.add_hline(y=half, line=dict(color='white', dash='dot', width=1),
-                      annotation_text='−3 dB', annotation_font_color='white')
+        peak = float(G_tot.max())
+        half = peak - 3.0
+        fig.add_hline(y=half, line=dict(color='#ffd600', dash='dot', width=1.5),
+                      annotation_text='−3 dB', annotation_font_color='#ffd600')
+        crossings, _ = _find_hpbw_crossings(angles, G_tot)
+        for ang in crossings:
+            fig.add_vline(x=ang, line=dict(color='#ffd600', dash='dash', width=1.2))
+        if len(crossings) >= 2:
+            hpbw_val = abs(crossings[1] - crossings[0])
+            if hpbw_val > 180: hpbw_val = 360 - hpbw_val
+            fig.add_annotation(
+                text=f'HPBW ≈ {hpbw_val:.1f}°',
+                xref='paper', yref='paper', x=0.5, y=1.05,
+                showarrow=False, font=dict(color='#ffd600', size=11))
 
     fig.update_layout(
         **_LAYOUT_BASE,
-        title=dict(text=f'Rect Cut — {cut_type} @ {cut_value}°', font=dict(color=_FONT_COLOR)),
+        title=dict(text=f'Rect Cut — {cut_type} @ {cut_value:.1f}°', font=dict(color=_FONT_COLOR)),
         xaxis=_axis_style(title=x_label),
         yaxis=_axis_style(title='Gain (dB)', range=[cmin, cmax]),
         legend=dict(font=dict(color=_FONT_COLOR), bgcolor='rgba(0,0,0,0.3)'),
@@ -216,19 +264,20 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
     angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, component)
     comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
     G_plot    = comp_data.get(component, G_tot)
-    r_vals    = np.clip(G_plot, cmin, cmax) - cmin
+    shift     = -cmin
+    r_vals    = np.clip(G_plot, cmin, cmax) + shift
 
-    # Close the polygon
-    r_closed = np.append(r_vals, r_vals[0])
-    a_closed = np.append(angles,  angles[0])
+    r_closed  = np.append(r_vals, r_vals[0])
+    a_closed  = np.append(angles,  angles[0])
 
-    tick_vals = list(range(0, int(cmax - cmin) + 10, 10))
+    tick_max  = int(cmax - cmin) + 10
+    tick_vals = list(range(0, tick_max, 10))
     tick_text = [f'{v + cmin:.0f}' for v in tick_vals]
 
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(
         r=r_closed, theta=a_closed, mode='lines',
-        fill='toself', fillcolor='rgba(79,195,247,0.22)',
+        fill='toself', fillcolor='rgba(79,195,247,0.20)',
         line=dict(color='#4fc3f7', width=2),
         name=component,
         hovertemplate='%{theta:.1f}°: %{customdata:.2f} dB<extra></extra>',
@@ -237,7 +286,8 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
 
     fig.update_layout(
         **_LAYOUT_BASE,
-        title=dict(text=f'Filled Polar — {cut_type} @ {cut_value}°', font=dict(color=_FONT_COLOR)),
+        title=dict(text=f'Filled Polar — {cut_type} @ {cut_value:.1f}°  [{component}]',
+                   font=dict(color=_FONT_COLOR)),
         polar=dict(
             bgcolor=_BG,
             angularaxis=dict(tickcolor=_FONT_COLOR, gridcolor=_GRID_COLOR,
@@ -355,14 +405,9 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
     return fig
 
 
-# backward-compat alias
-def plot_3d_spherical(R, component='Total Gain', cmin=None, cmax=None):
-    return plot_3d_pattern(R, component, cmin, cmax)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Circular (azimuthal equidistant) — phi=0 at top, clockwise
-# x = θ·sin(φ),  y = θ·cos(φ)   →  φ=0 → top,  φ=90 → right  (CW)
+# x = θ·sin(φ),  y = θ·cos(φ)  →  φ=0 → top,  φ=90 → right  (CW)
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
                   cmin: float = None, cmax: float = None) -> go.Figure:
@@ -373,16 +418,14 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
     th_max = float(R.theta_vec.max())
     N = 400
 
-    # Cartesian CW convention: x = θ·sin(φ),  y = θ·cos(φ)
     xi = np.linspace(-th_max, th_max, N)
     yi = np.linspace(-th_max, th_max, N)
     XI, YI = np.meshgrid(xi, yi)
 
     TH_i = np.sqrt(XI ** 2 + YI ** 2)
-    # atan2(x, y) gives azimuth measured CW from +y (= north/top)
+    # CW convention: atan2(x, y) → azimuth from +y (north) going clockwise
     PH_i = np.rad2deg(np.arctan2(XI, YI)) % 360.0
 
-    # Interpolate on the regular (theta, phi) grid, seam-wrapped
     pv, gw = _wrap_phi(R, grid)
     interp = RegularGridInterpolator(
         (R.theta_vec, pv), gw,
@@ -390,19 +433,28 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
 
     pts  = np.column_stack([TH_i.ravel(), PH_i.ravel()])
     G_i  = interp(pts).reshape(N, N)
-    G_i[TH_i > th_max] = np.nan
+    mask_out = TH_i > th_max
+    G_i[mask_out] = np.nan
+
+    # customdata: stack theta and phi → shape (N, N, 2)
+    th_cd = TH_i.copy(); ph_cd = PH_i.copy()
+    th_cd[mask_out] = np.nan; ph_cd[mask_out] = np.nan
+    customdata = np.stack([th_cd, ph_cd], axis=-1)   # (N, N, 2)
 
     fig = go.Figure(go.Heatmap(
         x=xi, y=yi, z=G_i,
         zmin=cmin, zmax=cmax, colorscale=_COLORSCALE,
+        customdata=customdata,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
-        hovertemplate='x=%{x:.1f}<br>y=%{y:.1f}<br>' + label + '=%{z:.2f}<extra></extra>',
+        hovertemplate=(
+            'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
+            + label + '=%{z:.2f}<extra></extra>'
+        ),
     ))
 
     ph_ring = np.linspace(0, 2 * np.pi, 361)
     for thr_ring in [30, 60, 90, 120, 150, 180]:
         if thr_ring > th_max * 1.01: break
-        # ring in CW coords: x=r*sin, y=r*cos
         fig.add_trace(go.Scatter(
             x=thr_ring * np.sin(ph_ring), y=thr_ring * np.cos(ph_ring),
             mode='lines', line=dict(color='rgba(255,255,255,0.18)', width=0.8),
@@ -411,9 +463,8 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
                            showarrow=False,
                            font=dict(color='rgba(255,255,255,0.55)', size=9))
 
-    # Cardinal labels: phi=0 top, phi=90 right, phi=180 bottom, phi=270 left
     for ph_lbl, txt in [(0, 'φ=0°'), (90, 'φ=90°'), (180, 'φ=180°'), (270, 'φ=270°')]:
-        r_lbl = th_max * 1.1
+        r_lbl = th_max * 1.11
         fig.add_annotation(
             x=r_lbl * np.sin(np.deg2rad(ph_lbl)),
             y=r_lbl * np.cos(np.deg2rad(ph_lbl)),
@@ -422,7 +473,7 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
 
     fig.update_layout(
         **_LAYOUT_BASE,
-        title=dict(text=f'Circular (Azimuthal) — {label}', font=dict(color=_FONT_COLOR)),
+        title=dict(text=f'Circular (φ=0 top, CW) — {label}', font=dict(color=_FONT_COLOR)),
         xaxis=_axis_style(title='θ·sin(φ)  [deg]', scaleanchor='y'),
         yaxis=_axis_style(title='θ·cos(φ)  [deg]'),
     )
@@ -433,9 +484,8 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
 # Coverage CDF
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_coverage_cdf(thresholds, coverage_list: list, names: list) -> go.Figure:
-    """thresholds: single ndarray or list of arrays; coverage_list: list of fraction arrays."""
-    thr_list = [thresholds] * len(coverage_list) if isinstance(thresholds, np.ndarray) \
-               else list(thresholds)
+    thr_list = ([thresholds] * len(coverage_list) if isinstance(thresholds, np.ndarray)
+                else list(thresholds))
 
     colors = ['#4fc3f7', '#ef5350', '#66bb6a', '#ffa726', '#ab47bc',
               '#26c6da', '#d4e157', '#ff7043', '#78909c', '#ec407a']

@@ -1,7 +1,7 @@
 """
 Antenna Pattern Analyzer (APA) — unified Python/NiceGUI implementation.
 """
-import sys, os
+import sys, os, traceback
 sys.path.insert(0, os.path.dirname(__file__))
 
 import numpy as np
@@ -32,9 +32,7 @@ _ui_tabs = {}
 COMPONENTS = ['Total Gain', 'RHCP Gain', 'LHCP Gain', 'Axial Ratio', 'PLF']
 CUT_TYPES  = ['Phi Cut', 'Theta Cut']
 
-# Full-pattern plot types (no cut controls needed)
 FULL_PLOT_TYPES = ['Contour', 'Circular', '3D Pattern', '3D Spherical']
-# Cut plot types (need cut_type + cut_value)
 CUT_PLOT_TYPES  = ['Polar Cut', 'Rect Cut', 'Filled Polar']
 PLOT_TYPES      = FULL_PLOT_TYPES + CUT_PLOT_TYPES
 
@@ -87,7 +85,7 @@ def _card(title=''):
 
 
 def _render_plot(R, plot_type, component, cut_type, cut_value, cmin, cmax,
-                 show_peak=True, show_hpbw=True):
+                 show_peak=True, show_hpbw=False):
     if plot_type == 'Contour':
         return plot_contour(R, component, cmin, cmax, show_peak)
     elif plot_type == 'Circular':
@@ -154,7 +152,7 @@ def _build_single_tab():
 
     with ui.row().classes('w-full gap-2').style('flex-wrap:nowrap'):
 
-        # ── Left controls ─────────────────────────────────────────────────
+        # ── Left controls ──────────────────────────────────────────────────
         with ui.column().style('width:272px; min-width:260px; gap:6px; flex-shrink:0'):
 
             with _card('Load Pattern'):
@@ -163,7 +161,7 @@ def _build_single_tab():
                 ui.upload(
                     label='Drop / click to upload', auto_upload=True,
                     on_upload=lambda e: _on_upload_single(
-                        e, lbl_status, plot_refs, tbl_in, tbl_out,
+                        e, lbl_status, plot_refs, tbl_in, tbl_data, tbl_out,
                         lbl_peak, lbl_pol, lbl_hpbw)
                 ).props(
                     'accept=".fz,.uan,.ffe,.ffd,.ffs,.out,.cut,.csv,.txt,.dat"'
@@ -182,7 +180,8 @@ def _build_single_tab():
                 def _reprocess():
                     if _state['P_single'] is None:
                         _notify_err('Load a file first.'); return
-                    _do_process_single(plot_refs, tbl_in, tbl_out, lbl_peak, lbl_pol, lbl_hpbw,
+                    _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
+                                       lbl_peak, lbl_pol, lbl_hpbw,
                                        pt_inp, loss_inp, rw_inp, dist_inp)
                 ui.button('Re-process', on_click=_reprocess, icon='refresh').props(
                     'flat color=blue').classes('w-full')
@@ -199,11 +198,16 @@ def _build_single_tab():
                     P = _state['P_single']; R = _state['R_single']
                     for p in _state['cov_patterns']:
                         if p['name'] == P.name:
-                            _notify(f'"{P.name}" already in Coverage.', 'warning'); return
-                    _state['cov_patterns'].append({'name': P.name, 'R': R, 'enabled': True})
+                            _notify(f'"{P.name}" already in Coverage.', 'warning')
+                            _ui_tabs['tabs'].set_value(_ui_tabs['t_coverage'])
+                            return
+                    pat_entry = {'name': P.name, 'R': R, 'enabled': True}
+                    _state['cov_patterns'].append(pat_entry)
+                    # Refresh the coverage list UI if callback is registered
+                    if _ui_tabs.get('refresh_cov_list'):
+                        _ui_tabs['refresh_cov_list'](pat_entry)
                     _notify(f'Sent "{P.name}" → Coverage tab')
-                    if _ui_tabs.get('tabs'):
-                        _ui_tabs['tabs'].set_value(_ui_tabs['t_coverage'])
+                    _ui_tabs['tabs'].set_value(_ui_tabs['t_coverage'])
 
                 def _send_to_combine():
                     if _state['R_single'] is None:
@@ -211,11 +215,14 @@ def _build_single_tab():
                     P = _state['P_single']; R = _state['R_single']
                     for p in _state['cmb_patterns']:
                         if p['name'] == P.name:
-                            _notify(f'"{P.name}" already in Combine.', 'warning'); return
+                            _notify(f'"{P.name}" already in Combine.', 'warning')
+                            _ui_tabs['tabs'].set_value(_ui_tabs['t_combine'])
+                            return
                     _state['cmb_patterns'].append({'name': P.name, 'R': R})
+                    if _ui_tabs.get('refresh_cmb_list'):
+                        _ui_tabs['refresh_cmb_list']({'name': P.name, 'R': R})
                     _notify(f'Sent "{P.name}" → Combine tab')
-                    if _ui_tabs.get('tabs'):
-                        _ui_tabs['tabs'].set_value(_ui_tabs['t_combine'])
+                    _ui_tabs['tabs'].set_value(_ui_tabs['t_combine'])
 
                 with ui.row().classes('w-full gap-1'):
                     ui.button('→ Coverage', on_click=_send_to_coverage, icon='radar').props(
@@ -235,15 +242,19 @@ def _build_single_tab():
                         _notify_err('Load a file first.'); return
                     try:
                         R_mat = rotation_matrix_from_vectors(
-                            src_th.value, src_ph.value, dst_th.value, dst_ph.value)
+                            float(src_th.value), float(src_ph.value),
+                            float(dst_th.value), float(dst_ph.value))
                         _state['rot_matrix'] = _state['rot_matrix'] @ R_mat
                         P = _state['P_single']
-                        P.theta, P.phi = apply_rotation(P, R_mat)
+                        new_th, new_ph = apply_rotation(P, R_mat)
+                        P.theta = new_th
+                        P.phi   = new_ph
                         P._build_header()
                         _notify('Rotation applied — re-processing…')
                         _reprocess()
                     except Exception as ex:
-                        _notify_err(str(ex))
+                        traceback.print_exc()
+                        _notify_err(f'Rotation error: {ex}')
 
                 def _reset_rot():
                     _state['rot_matrix'] = np.eye(3)
@@ -270,7 +281,7 @@ def _build_single_tab():
                 ui.button('Export Output CSV', on_click=_export_csv, icon='download').props(
                     'flat color=teal').classes('w-full')
 
-        # ── Right: plot + tables ──────────────────────────────────────────
+        # ── Right: plot + tables ────────────────────────────────────────────
         with ui.column().classes('flex-1').style('gap:6px; min-width:0'):
 
             # Plot controls bar
@@ -289,20 +300,25 @@ def _build_single_tab():
                     'dense dark outlined').style('min-width:88px')
                 cmax_inp = ui.number('Cmax (dB)', value=0.0,   format='%.0f').props(
                     'dense dark outlined').style('min-width:88px')
-                cb_peak = ui.checkbox('Peak', value=True).props('dark color=blue').style('color:#e0e0e0')
-                cb_hpbw = ui.checkbox('HPBW', value=True).props('dark color=blue').style('color:#e0e0e0')
+                cb_peak = ui.checkbox('Peak', value=True).props(
+                    'dark color=blue').style('color:#e0e0e0')
+                cb_hpbw = ui.checkbox('HPBW', value=False).props(
+                    'dark color=yellow').style('color:#e0e0e0')
 
-                def _update_cut_visibility():
-                    show = plot_dd.value in CUT_PLOT_TYPES
-                    cut_type.set_visibility(show)
-                    cut_val.set_visibility(show)
+                def _update_controls_visibility():
+                    is_cut = plot_dd.value in CUT_PLOT_TYPES
+                    cut_type.set_visibility(is_cut)
+                    cut_val.set_visibility(is_cut)
+                    # HPBW only meaningful for Polar Cut and Rect Cut
+                    cb_hpbw.set_visibility(plot_dd.value in ('Polar Cut', 'Rect Cut'))
 
-                # Hide cut controls by default (Contour is selected)
+                # Initial visibility (Contour = no cut controls, no HPBW)
                 cut_type.set_visibility(False)
                 cut_val.set_visibility(False)
+                cb_hpbw.set_visibility(False)
 
                 def _refresh_plot():
-                    _update_cut_visibility()
+                    _update_controls_visibility()
                     if _state['R_single'] is None: return
                     _update_single_plot(
                         plot_refs, comp_dd, plot_dd, cut_type, cut_val,
@@ -326,26 +342,45 @@ def _build_single_tab():
             cb_peak.on('update:model-value', lambda _: _refresh_plot())
             cb_hpbw.on('update:model-value', lambda _: _refresh_plot())
 
-            # Data tables
+            # ── Data tables (3 tabs) ────────────────────────────────────────
             with ui.tabs().props('dense indicator-color=blue').classes('w-full') as dtabs:
-                dt_in  = ui.tab('Input Data')
-                dt_out = ui.tab('Output Metrics')
+                dt_in   = ui.tab('Input Data')
+                dt_data = ui.tab('Output Data')
+                dt_out  = ui.tab('Output Metrics')
 
             with ui.tab_panels(dtabs, value=dt_in).classes('w-full').style(
                     'background:#0d1117'):
+
                 with ui.tab_panel(dt_in):
                     tbl_in = ui.table(
                         columns=[
-                            {'name': 'theta', 'label': 'θ (°)',    'field': 'theta', 'sortable': True},
-                            {'name': 'phi',   'label': 'φ (°)',    'field': 'phi',   'sortable': True},
-                            {'name': 'gth',   'label': 'Gθ (dB)', 'field': 'gth'},
-                            {'name': 'gph',   'label': 'Gφ (dB)', 'field': 'gph'},
+                            {'name': 'theta', 'label': 'θ (°)',   'field': 'theta', 'sortable': True},
+                            {'name': 'phi',   'label': 'φ (°)',   'field': 'phi',   'sortable': True},
+                            {'name': 'gth',   'label': '|Eθ| dB', 'field': 'gth'},
+                            {'name': 'gph',   'label': '|Eφ| dB', 'field': 'gph'},
                             {'name': 'pth',   'label': '∠Eθ (°)', 'field': 'pth'},
                             {'name': 'pph',   'label': '∠Eφ (°)', 'field': 'pph'},
                         ],
                         rows=[], row_key='theta',
                     ).props('dense dark flat virtual-scroll').style(
                         'max-height:220px').classes('w-full')
+
+                with ui.tab_panel(dt_data):
+                    tbl_data = ui.table(
+                        columns=[
+                            {'name': 'theta', 'label': 'θ (°)',         'field': 'theta', 'sortable': True},
+                            {'name': 'phi',   'label': 'φ (°)',         'field': 'phi',   'sortable': True},
+                            {'name': 'gtot',  'label': 'G_tot (dBi)',   'field': 'gtot',  'sortable': True},
+                            {'name': 'grhcp', 'label': 'G_RHCP (dBic)', 'field': 'grhcp'},
+                            {'name': 'glhcp', 'label': 'G_LHCP (dBic)', 'field': 'glhcp'},
+                            {'name': 'ar',    'label': 'AR (dB)',        'field': 'ar'},
+                            {'name': 'plf',   'label': 'PLF (dB)',       'field': 'plf'},
+                            {'name': 'eirp',  'label': 'EIRP (dBW)',     'field': 'eirp'},
+                        ],
+                        rows=[], row_key='theta',
+                    ).props('dense dark flat virtual-scroll').style(
+                        'max-height:220px').classes('w-full')
+
                 with ui.tab_panel(dt_out):
                     tbl_out = ui.table(
                         columns=[
@@ -357,10 +392,10 @@ def _build_single_tab():
                         'max-height:220px').classes('w-full')
 
 
-# ── Single-tab callbacks ─────────────────────────────────────────────────────
+# ── Single-tab callbacks ──────────────────────────────────────────────────────
 
-async def _on_upload_single(e, lbl_status, plot_refs, tbl_in, tbl_out,
-                            lbl_peak, lbl_pol, lbl_hpbw):
+async def _on_upload_single(e, lbl_status, plot_refs, tbl_in, tbl_data, tbl_out,
+                             lbl_peak, lbl_pol, lbl_hpbw):
     try:
         data = await e.file.read()
         P = load_pattern(data, filename=e.file.name,
@@ -374,16 +409,18 @@ async def _on_upload_single(e, lbl_status, plot_refs, tbl_in, tbl_out,
             f'θ {h["theta_min"]:.0f}°–{h["theta_max"]:.0f}°  '
             f'φ {h["phi_min"]:.0f}°–{h["phi_max"]:.0f}°  '
             f'{h["n_theta"]}×{h["n_phi"]} pts')
-        _do_process_single(plot_refs, tbl_in, tbl_out, lbl_peak, lbl_pol, lbl_hpbw,
+        _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
+                           lbl_peak, lbl_pol, lbl_hpbw,
                            plot_refs['pt'], plot_refs['loss'],
                            plot_refs['rw'],  plot_refs['dist'])
     except Exception as ex:
-        import traceback; traceback.print_exc()
+        traceback.print_exc()
         _notify_err(f'Load error: {ex}')
         lbl_status.set_text(f'Error: {ex}')
 
 
-def _do_process_single(plot_refs, tbl_in, tbl_out, lbl_peak, lbl_pol, lbl_hpbw,
+def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
+                        lbl_peak, lbl_pol, lbl_hpbw,
                         pt_inp, loss_inp, rw_inp, dist_inp):
     P = _state['P_single']
     if P is None: return
@@ -406,10 +443,11 @@ def _do_process_single(plot_refs, tbl_in, tbl_out, lbl_peak, lbl_pol, lbl_hpbw,
         fb = f'   FBR={R.fbr_dB:.1f} dB' if R.fbr_dB else ''
         lbl_hpbw.set_text(f'HPBW  E:{he}  H:{hh}{fb}')
 
-        # Input data table
         MAX = 2000
         n   = len(P.theta)
         idx = np.arange(min(n, MAX))
+
+        # ── Input data table ──────────────────────────────────────────────
         Gth = 20 * np.log10(np.abs(P.Eth[idx]) + 1e-30)
         Gph = 20 * np.log10(np.abs(P.Eph[idx]) + 1e-30)
         pth = np.angle(P.Eth[idx], deg=True)
@@ -424,7 +462,20 @@ def _do_process_single(plot_refs, tbl_in, tbl_out, lbl_peak, lbl_pol, lbl_hpbw,
         if n > MAX:
             _notify(f'Input table: showing first {MAX} of {n} rows.', 'info')
 
-        # Output metrics table
+        # ── Output data table (processed per-point) ───────────────────────
+        tbl_data.rows = [
+            dict(theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
+                 gtot=f'{R.G_total_dB[i]:.3f}',
+                 grhcp=f'{R.G_RHCP_dB[i]:.3f}',
+                 glhcp=f'{R.G_LHCP_dB[i]:.3f}',
+                 ar=f'{R.AR_dB[i]:.3f}',
+                 plf=f'{R.PLF_dB[i]:.3f}',
+                 eirp=f'{R.EIRP_dBW[i]:.3f}')
+            for i in idx
+        ]
+        tbl_data.update()
+
+        # ── Output metrics table ──────────────────────────────────────────
         tbl_out.rows = [{'metric': r[0], 'value': r[1]} for r in R.table_rows]
         tbl_out.update()
 
@@ -437,7 +488,7 @@ def _do_process_single(plot_refs, tbl_in, tbl_out, lbl_peak, lbl_pol, lbl_hpbw,
 
         _notify(f'Processed  {P.name}  [{P.fmt}]')
     except Exception as ex:
-        import traceback; traceback.print_exc()
+        traceback.print_exc()
         _notify_err(f'Processing error: {ex}')
 
 
@@ -454,7 +505,7 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
         )
         plot_refs['main'].update_figure(fig)
     except Exception as ex:
-        import traceback; traceback.print_exc()
+        traceback.print_exc()
         _notify_err(f'Plot error: {ex}')
 
 
@@ -625,22 +676,24 @@ def _build_coverage_tab():
 
         with ui.column().style('width:300px; min-width:260px; gap:6px; flex-shrink:0'):
 
-            with _card('Load Patterns'):
+            with _card('Loaded Patterns'):
+                lbl_cov_n = ui.label('0 patterns loaded').style(
+                    'color:#8b949e; font-size:0.78rem')
+                with ui.scroll_area().style(
+                        'max-height:200px; width:100%; background:#0d1117; '
+                        'border-radius:4px; border:1px solid #30363d'):
+                    cov_list_col = ui.column().classes('w-full').style(
+                        'gap:2px; padding:4px')
+
                 ui.upload(
                     label='Upload pattern file(s)',
                     auto_upload=True, multiple=True,
-                    on_upload=lambda e: _on_cov_upload(e, cov_list_col, lbl_cov_n)
+                    on_upload=lambda e: _on_cov_upload(e, cov_list_col, lbl_cov_n,
+                                                        _refresh_cov_plot)
                 ).props(
                     'accept=".fz,.uan,.ffe,.ffd,.ffs,.out,.cut,.csv,.txt,.dat"'
                     ' color=blue flat'
                 ).classes('w-full')
-                lbl_cov_n = ui.label('0 patterns loaded').style(
-                    'color:#8b949e; font-size:0.78rem')
-
-                with ui.scroll_area().style(
-                        'max-height:200px; width:100%; background:#0d1117; '
-                        'border-radius:4px; border:1px solid #30363d'):
-                    cov_list_col = ui.column().classes('w-full').style('gap:2px; padding:4px')
 
                 def _clear_cov():
                     _state['cov_patterns'].clear(); _state['cov_runs'].clear()
@@ -653,13 +706,16 @@ def _build_coverage_tab():
             with _card('Coverage Parameters'):
                 cov_mode = ui.radio(['Spherical', 'Conical'], value='Spherical').props(
                     'dark inline color=blue').classes('w-full')
+
                 with ui.column().classes('w-full gap-1') as cone_col:
                     cone_th  = ui.number('Cone axis θ (°)', value=0.0,  format='%.1f').props('dense dark outlined')
                     cone_ph  = ui.number('Cone axis φ (°)', value=0.0,  format='%.1f').props('dense dark outlined')
                     cone_ang = ui.number('Half-angle (°)',  value=60.0, format='%.1f').props('dense dark outlined')
                 cone_col.set_visibility(False)
-                cov_mode.on('update:model-value',
-                            lambda v: cone_col.set_visibility(v.args == 'Conical'))
+
+                def _on_mode_change(e):
+                    cone_col.set_visibility(e.args == 'Conical')
+                cov_mode.on('update:model-value', _on_mode_change)
 
                 ui.separator().style('background:#30363d')
                 with ui.grid(columns=3).classes('w-full gap-1'):
@@ -701,7 +757,7 @@ def _build_coverage_tab():
                 _notify('Downloading coverage.csv')
 
             with ui.row().classes('w-full gap-1'):
-                ui.button('Compute',   on_click=_run_coverage, icon='radar').props(
+                ui.button('Compute',    on_click=_run_coverage, icon='radar').props(
                     'flat color=green').classes('flex-1')
                 ui.button('Export CSV', on_click=_export_cov,   icon='download').props(
                     'flat color=teal').classes('flex-1')
@@ -716,7 +772,23 @@ def _build_coverage_tab():
                 ).props('dense dark flat virtual-scroll').style(
                     'max-height:220px').classes('w-full')
 
-    # ── Helpers (closed over cov_plot and cov_results_tbl) ────────────────
+    # ── Helpers ──────────────────────────────────────────────────────────────
+    def _add_cov_row_to_list(pat_entry):
+        """Add one pattern row to the cov_list_col column widget."""
+        n = len(_state['cov_patterns'])
+        lbl_cov_n.set_text(f'{n} pattern(s) loaded')
+        with cov_list_col:
+            with ui.row().classes('w-full items-center gap-1').style('flex-wrap:nowrap'):
+                cb = ui.checkbox(
+                    value=pat_entry.get('enabled', True),
+                    on_change=lambda e, p=pat_entry: p.update({'enabled': e.value})
+                ).props('dark color=blue size=xs')
+                ui.label(pat_entry['name']).style(
+                    'font-size:0.8rem; color:#e0e0e0; flex:1; '
+                    'overflow:hidden; text-overflow:ellipsis')
+                ui.label(f'{pat_entry["R"].max_gain_dB:.1f} dBi').style(
+                    'font-size:0.75rem; color:#8b949e; white-space:nowrap')
+
     def _refresh_cov_plot():
         runs = _state['cov_runs']
         if not runs: return
@@ -729,9 +801,7 @@ def _build_coverage_tab():
             )
         )
 
-        # Results table: rows=thresholds, columns=patterns
         thr_arr = np.asarray(runs[0]['thr'])
-        # Downsample to ≤30 rows for readability
         step = max(1, len(thr_arr) // 30)
 
         cols = [{'name': 'threshold', 'label': 'Threshold (dBi)',
@@ -752,8 +822,15 @@ def _build_coverage_tab():
         cov_results_tbl.rows    = rows
         cov_results_tbl.update()
 
+    # Register the list-row-adder so Single tab "→ Coverage" can call it
+    _ui_tabs['refresh_cov_list'] = _add_cov_row_to_list
 
-async def _on_cov_upload(e, lst_col, lbl):
+    # Rebuild list rows for any patterns already in state (e.g. sent before tab built)
+    for pat_entry in _state['cov_patterns']:
+        _add_cov_row_to_list(pat_entry)
+
+
+async def _on_cov_upload(e, lst_col, lbl, refresh_plot_fn):
     try:
         data = await e.file.read()
         P = load_pattern(data, filename=e.file.name)
@@ -765,9 +842,10 @@ async def _on_cov_upload(e, lst_col, lbl):
 
         with lst_col:
             with ui.row().classes('w-full items-center gap-1').style('flex-wrap:nowrap'):
-                cb = ui.checkbox(value=True,
-                                 on_change=lambda e, p=pat_entry: p.update({'enabled': e.value})
-                                 ).props('dark color=blue size=xs')
+                cb = ui.checkbox(
+                    value=True,
+                    on_change=lambda e, p=pat_entry: p.update({'enabled': e.value})
+                ).props('dark color=blue size=xs')
                 ui.label(P.name).style(
                     'font-size:0.8rem; color:#e0e0e0; flex:1; '
                     'overflow:hidden; text-overflow:ellipsis')
@@ -776,6 +854,7 @@ async def _on_cov_upload(e, lst_col, lbl):
 
         _notify(f'Loaded {P.name}')
     except Exception as ex:
+        traceback.print_exc()
         _notify_err(f'Coverage load error ({e.file.name}): {ex}')
 
 
@@ -783,7 +862,7 @@ async def _on_cov_upload(e, lst_col, lbl):
 # TAB 4 — COMBINE
 # ══════════════════════════════════════════════════════════════════════════════
 def _build_combine_tab():
-    mask_rows = []      # list of {'type_el', 'v1_el', 'v2_el', 'phi_min_el', ...}
+    mask_rows = []      # list of {'v1_el', 'v2_el'} or {'phi_min_el', ...}
     cmb_refs  = {}
 
     with ui.row().classes('w-full gap-2').style('flex-wrap:nowrap'):
@@ -795,7 +874,8 @@ def _build_combine_tab():
                     label='Upload pattern file(s)',
                     auto_upload=True, multiple=True,
                     on_upload=lambda e: _on_cmb_upload(
-                        e, cmb_list, lbl_cmb_n, mask_col, mask_rows, cmb_refs)
+                        e, cmb_list, lbl_cmb_n, mask_col, mask_rows, cmb_refs,
+                        subplot_row_ref)
                 ).props(
                     'accept=".fz,.uan,.ffe,.ffd,.ffs,.out,.cut,.csv,.txt,.dat"'
                     ' color=blue flat'
@@ -811,8 +891,7 @@ def _build_combine_tab():
                     lbl_cmb_n.set_text('0 pattern(s)')
                     cmb_plot_el.update_figure({})
                     lbl_cmb_result.set_text('Upload ≥ 2 patterns and click Combine')
-                    if cmb_refs.get('subplot_row'):
-                        cmb_refs['subplot_row'].clear()
+                    subplot_row_ref[0].clear()
                 ui.button('Clear All', on_click=_clear_cmb, icon='delete').props(
                     'flat color=red size=sm').classes('w-full')
 
@@ -824,16 +903,6 @@ def _build_combine_tab():
                     'Envelope = max per direction  |  Regional Mask = sector selection'
                 ).style('color:#8b949e; font-size:0.72rem; white-space:pre-line')
 
-            # ── Regional Mask card — hidden until Regional Mask selected ──
-            with _card('Regional Masks') as mask_card_ctx:
-                mask_card_el = mask_card_ctx
-
-            # We need the actual card widget to toggle visibility.
-            # Re-create it as a column with set_visibility support.
-
-        # We build the mask card outside the nested `with` to get a ref:
-        # (restructured below — see mask_outer)
-
         with ui.column().classes('flex-1').style('gap:6px; min-width:0'):
             with _card('Loaded Patterns Preview'):
                 loaded_scroll = ui.scroll_area().style(
@@ -841,7 +910,7 @@ def _build_combine_tab():
                 with loaded_scroll:
                     subplot_row = ui.row().classes('gap-2').style(
                         'flex-wrap:nowrap; padding:6px; align-items:flex-start')
-                cmb_refs['subplot_row'] = subplot_row
+            subplot_row_ref = [subplot_row]   # list so it's mutable from closures
 
             lbl_cmb_result = ui.label(
                 'Upload ≥ 2 patterns and click Combine'
@@ -877,7 +946,7 @@ def _build_combine_tab():
 
                 cmb_plot_el = ui.plotly({}).classes('w-full').style('height:460px')
 
-    # ── Regional Mask panel — built separately so we can toggle visibility ──
+    # ── Regional Mask panel ────────────────────────────────────────────────
     with ui.column().classes('w-full').style('gap:6px') as mask_outer:
         with ui.card().tight().style(
                 'background:#161b22; border:1px solid #30363d; border-radius:8px; '
@@ -886,7 +955,6 @@ def _build_combine_tab():
                 'font-size:0.75rem; font-weight:600; color:#8b949e; '
                 'text-transform:uppercase; letter-spacing:0.08em')
 
-            # Global mask type selector
             with ui.row().classes('w-full items-center gap-2'):
                 ui.label('Mask type (all patterns):').style(
                     'color:#e0e0e0; font-size:0.82rem; white-space:nowrap')
@@ -899,20 +967,18 @@ def _build_combine_tab():
             with ui.scroll_area().style('max-height:280px; width:100%'):
                 mask_col = ui.column().classes('w-full').style('gap:4px')
 
-            ui.label('Pattern 1 covers areas NOT explicitly assigned to other patterns '
-                     '(first match wins when masks overlap).').style(
-                'color:#8b949e; font-size:0.72rem; font-style:italic')
+            ui.label(
+                'Tip: each zone covers the range [min, max]. '
+                'Changing a zone\'s upper limit auto-updates the next zone\'s lower limit (+1°).'
+            ).style('color:#8b949e; font-size:0.72rem; font-style:italic')
 
-    mask_outer.set_visibility(False)   # hidden by default
+    mask_outer.set_visibility(False)
 
-    # Show/hide regional mask panel when method changes
-    def _on_method_change(v):
-        show = (cmb_method.value == 'Regional Mask')
-        mask_outer.set_visibility(show)
-
+    def _on_method_change(e):
+        mask_outer.set_visibility(cmb_method.value == 'Regional Mask')
     cmb_method.on('update:model-value', _on_method_change)
 
-    # ── Combine / Export buttons (below everything) ───────────────────────
+    # ── Combine / Export buttons ────────────────────────────────────────────
     with ui.row().classes('w-full gap-1').style('padding:4px 0'):
         def _run_combine():
             pats = _state['cmb_patterns']
@@ -926,16 +992,16 @@ def _build_combine_tab():
                     if mtype_key == 'custom':
                         masks.append({
                             'type':      'custom',
-                            'phi_min':   row['phi_min_el'].value,
-                            'phi_max':   row['phi_max_el'].value,
-                            'theta_min': row['th_min_el'].value,
-                            'theta_max': row['th_max_el'].value,
+                            'phi_min':   float(row['phi_min_el'].value),
+                            'phi_max':   float(row['phi_max_el'].value),
+                            'theta_min': float(row['th_min_el'].value),
+                            'theta_max': float(row['th_max_el'].value),
                         })
                     else:
                         masks.append({
                             'type': mtype_key,
-                            'v1':   row['v1_el'].value,
-                            'v2':   row['v2_el'].value,
+                            'v1':   float(row['v1_el'].value),
+                            'v2':   float(row['v2_el'].value),
                         })
             try:
                 R_comb = combine_patterns(
@@ -948,7 +1014,7 @@ def _build_combine_tab():
                     f'Peak: {R_comb.max_gain_dB:.2f} dBi  |  {R_comb.dominant_pol}')
                 _notify('Combine complete.')
             except Exception as ex:
-                import traceback; traceback.print_exc()
+                traceback.print_exc()
                 _notify_err(f'Combine error: {ex}')
 
         def _export_combined():
@@ -962,54 +1028,122 @@ def _build_combine_tab():
             ui.download('\n'.join(rows).encode(), 'combined_pattern.csv')
             _notify('Downloading combined_pattern.csv')
 
-        ui.button('Combine', on_click=_run_combine, icon='merge').props(
-            'flat color=green')
-        ui.button('Export CSV', on_click=_export_combined, icon='download').props(
-            'flat color=teal')
+        ui.button('Combine',    on_click=_run_combine,    icon='merge').props('flat color=green')
+        ui.button('Export CSV', on_click=_export_combined, icon='download').props('flat color=teal')
 
-    # ── Helpers ────────────────────────────────────────────────────────────
+    # ── Mask row builder ────────────────────────────────────────────────────
     def _rebuild_mask_rows():
-        """Rebuild mask input rows for all current patterns."""
         mask_col.clear()
         mask_rows.clear()
+        n_pats   = len(_state['cmb_patterns'])
+        if n_pats == 0:
+            return
         mtype_display = mask_type_global.value
-        is_custom = (mtype_display == 'Custom (Phi + Theta)')
+        is_custom     = (mtype_display == 'Custom (Phi + Theta)')
+        is_theta      = (mtype_display == 'Theta / Elevation')
 
-        for idx, pat in enumerate(_state['cmb_patterns']):
+        total   = 180.0 if is_theta else 360.0
+        span    = total / n_pats
+        # Non-overlapping defaults: zone k = [k*span, (k+1)*span] with 1° gap for all but last
+        # Gap of 1° means upper limit = (k+1)*span  and next lower = (k+1)*span + 1
+        # Simplification: lower[k] = k*span,  upper[k] = (k+1)*span - (1 if k < n-1 else 0)
+
+        for idx in range(n_pats):
             row_dict = {}
+            pat_name = _state['cmb_patterns'][idx]['name'][:20]
+            v1_default = round(idx * span, 1)
+            v2_default = round((idx + 1) * span - (1.0 if idx < n_pats - 1 else 0.0), 1)
+
             with mask_col:
                 with ui.row().classes('w-full gap-1 items-center').style('flex-wrap:wrap'):
-                    ui.label(f'Pat {idx + 1}: {pat["name"][:20]}').style(
-                        'color:#8b949e; min-width:110px; font-size:0.8rem')
+                    ui.label(f'Pat {idx + 1}: {pat_name}').style(
+                        'color:#8b949e; min-width:120px; font-size:0.8rem')
+
                     if is_custom:
-                        row_dict['phi_min_el']   = ui.number('φ min', value=idx * (360.0 / max(len(_state['cmb_patterns']), 1)), format='%.1f').props('dense dark outlined').style('width:72px')
-                        row_dict['phi_max_el']   = ui.number('φ max', value=(idx + 1) * (360.0 / max(len(_state['cmb_patterns']), 1)), format='%.1f').props('dense dark outlined').style('width:72px')
-                        row_dict['th_min_el']    = ui.number('θ min', value=0.0,   format='%.1f').props('dense dark outlined').style('width:66px')
-                        row_dict['th_max_el']    = ui.number('θ max', value=180.0, format='%.1f').props('dense dark outlined').style('width:66px')
+                        phi_span = 360.0 / n_pats
+                        row_dict['phi_min_el'] = ui.number(
+                            'φ min', value=round(idx * phi_span, 1),
+                            format='%.1f').props('dense dark outlined').style('width:72px')
+                        row_dict['phi_max_el'] = ui.number(
+                            'φ max',
+                            value=round((idx+1)*phi_span - (1.0 if idx < n_pats-1 else 0.0), 1),
+                            format='%.1f').props('dense dark outlined').style('width:72px')
+                        th_span = 180.0 / n_pats
+                        row_dict['th_min_el'] = ui.number(
+                            'θ min', value=round(idx * th_span, 1),
+                            format='%.1f').props('dense dark outlined').style('width:66px')
+                        row_dict['th_max_el'] = ui.number(
+                            'θ max',
+                            value=round((idx+1)*th_span - (1.0 if idx < n_pats-1 else 0.0), 1),
+                            format='%.1f').props('dense dark outlined').style('width:66px')
                     else:
-                        n = max(len(_state['cmb_patterns']), 1)
-                        span = 360.0 / n
-                        lbl_v = 'φ min / φ max' if 'Phi' in mtype_display else 'θ min / θ max'
-                        row_dict['v1_el'] = ui.number(lbl_v.split('/')[0].strip(),
-                                                      value=round(idx * span, 1),
-                                                      format='%.1f').props('dense dark outlined').style('width:80px')
-                        row_dict['v2_el'] = ui.number(lbl_v.split('/')[1].strip(),
-                                                      value=round((idx + 1) * span, 1),
-                                                      format='%.1f').props('dense dark outlined').style('width:80px')
+                        lbl_v1, lbl_v2 = (('θ min', 'θ max') if is_theta else ('φ min', 'φ max'))
+                        row_dict['v1_el'] = ui.number(
+                            lbl_v1, value=v1_default,
+                            format='%.1f').props('dense dark outlined').style('width:88px')
+                        row_dict['v2_el'] = ui.number(
+                            lbl_v2, value=v2_default,
+                            format='%.1f').props('dense dark outlined').style('width:88px')
+
             mask_rows.append(row_dict)
+
+        # Wire dynamic cascade: changing v2 of row k updates v1 of row k+1
+        def _make_cascade(k):
+            def _cascade(e):
+                if k + 1 < len(mask_rows):
+                    next_row = mask_rows[k + 1]
+                    next_v1  = next_row.get('v1_el') or next_row.get('phi_min_el')
+                    if next_v1 is not None:
+                        next_v1.set_value(round(float(e.value) + 1.0, 1))
+            return _cascade
+
+        for k, row_dict in enumerate(mask_rows):
+            v2 = row_dict.get('v2_el') or row_dict.get('phi_max_el')
+            if v2 is not None:
+                v2.on_change(_make_cascade(k))
 
     cmb_refs['rebuild_mask_rows'] = _rebuild_mask_rows
 
-    # Rebuild mask rows when global type changes
     mask_type_global.on('update:model-value', lambda _: _rebuild_mask_rows())
 
+    # Register a callback so Single tab "→ Combine" can add a row
+    def _add_cmb_list_item(pat_entry):
+        with cmb_list:
+            with ui.item():
+                with ui.item_section():
+                    ui.item_label(pat_entry['name'])
+                    ui.item_label(
+                        f'Peak {pat_entry["R"].max_gain_dB:.2f} dBi  •  {pat_entry["R"].dominant_pol}'
+                    ).props('caption')
+        lbl_cmb_n.set_text(f'{len(_state["cmb_patterns"])} pattern(s)')
+        _rebuild_mask_rows()
+        # Add subplot preview
+        try:
+            R = pat_entry['R']
+            cmin, cmax = auto_clim(R.max_gain_dB)
+            fig = plot_contour(R, 'Total Gain', cmin, cmax, show_peak=True)
+            fig.update_layout(
+                title=dict(text=pat_entry['name'], font=dict(size=10, color='#e0e0e0')),
+                margin=dict(l=30, r=10, t=30, b=30))
+            with subplot_row_ref[0]:
+                ui.plotly(fig).style('width:280px; height:240px; flex-shrink:0')
+        except Exception:
+            pass
 
-async def _on_cmb_upload(e, lst, lbl, mask_col, mask_rows, cmb_refs):
+    _ui_tabs['refresh_cmb_list'] = _add_cmb_list_item
+
+    # Populate from existing state (patterns sent before this tab was built)
+    for pat in _state['cmb_patterns']:
+        _add_cmb_list_item(pat)
+
+
+async def _on_cmb_upload(e, lst, lbl, mask_col, mask_rows, cmb_refs, subplot_row_ref):
     try:
         data = await e.file.read()
         P = load_pattern(data, filename=e.file.name)
         R = process_pattern(P)
-        _state['cmb_patterns'].append({'name': P.name, 'R': R})
+        pat_entry = {'name': P.name, 'R': R}
+        _state['cmb_patterns'].append(pat_entry)
         n = len(_state['cmb_patterns'])
         lbl.set_text(f'{n} pattern(s)')
 
@@ -1021,27 +1155,24 @@ async def _on_cmb_upload(e, lst, lbl, mask_col, mask_rows, cmb_refs):
                         f'Peak {R.max_gain_dB:.2f} dBi  •  {R.dominant_pol}'
                     ).props('caption')
 
-        # Rebuild mask rows for all patterns
         if cmb_refs.get('rebuild_mask_rows'):
             cmb_refs['rebuild_mask_rows']()
 
-        # Add subplot preview
-        subplot_row = cmb_refs.get('subplot_row')
-        if subplot_row is not None:
-            cmin, cmax = auto_clim(R.max_gain_dB)
-            try:
-                fig = plot_contour(R, 'Total Gain', cmin, cmax, show_peak=True)
-                fig.update_layout(
-                    title=dict(text=P.name, font=dict(size=10, color='#e0e0e0')),
-                    margin=dict(l=30, r=10, t=30, b=30),
-                )
-                with subplot_row:
-                    ui.plotly(fig).style('width:280px; height:240px; flex-shrink:0')
-            except Exception:
-                pass
+        # Subplot preview
+        cmin, cmax = auto_clim(R.max_gain_dB)
+        try:
+            fig = plot_contour(R, 'Total Gain', cmin, cmax, show_peak=True)
+            fig.update_layout(
+                title=dict(text=P.name, font=dict(size=10, color='#e0e0e0')),
+                margin=dict(l=30, r=10, t=30, b=30))
+            with subplot_row_ref[0]:
+                ui.plotly(fig).style('width:280px; height:240px; flex-shrink:0')
+        except Exception:
+            pass
 
         _notify(f'Loaded {P.name}')
     except Exception as ex:
+        traceback.print_exc()
         _notify_err(f'Load error ({e.file.name}): {ex}')
 
 
