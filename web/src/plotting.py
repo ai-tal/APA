@@ -513,12 +513,15 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
 
     fig = go.Figure()
     cs3d = _ar_colorscale() if component == 'Axial Ratio' else _COLORSCALE
+    _no_contour_highlight = dict(
+        x=dict(highlight=False), y=dict(highlight=False), z=dict(highlight=False))
     fig.add_trace(go.Surface(
         x=X, y=Y, z=Z,
         surfacecolor=gw, cmin=cmin, cmax=cmax,
         colorscale=cs3d,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         customdata=cd,
+        contours=_no_contour_highlight,
         hovertemplate=(
             'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
             + label + '=%{customdata[2]:.2f}<extra></extra>'
@@ -566,6 +569,8 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
     _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
                     title='', showaxeslabels=False, showbackground=False,
                     showspikes=False)
+    _no_contour_highlight = dict(
+        x=dict(highlight=False), y=dict(highlight=False), z=dict(highlight=False))
 
     cs_sph = _ar_colorscale() if component == 'Axial Ratio' else _COLORSCALE
     fig = go.Figure()
@@ -574,6 +579,7 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
         surfacecolor=gw, cmin=cmin, cmax=cmax,
         colorscale=cs_sph,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
+        contours=_no_contour_highlight,
         customdata=cd,
         hovertemplate=(
             'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'

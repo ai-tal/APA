@@ -468,7 +468,8 @@ def _build_single_tab():
                     'dense outlined').style('min-width:140px')
                 cut_type = ui.select(CUT_TYPES, value='Phi Cut', label='Cut Type').props(
                     'dense outlined').style('min-width:106px')
-                cut_val  = ui.number('Cut Value (°)', value=0.0, format='%.1f').props(
+                cut_val  = ui.number('Cut Value (°)', value=0.0, format='%.1f',
+                                     min=0.0, max=360.0).props(
                     'dense outlined').style('min-width:106px')
                 _CUT_COMPS = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
                 cut_comp = ui.select(
@@ -929,11 +930,11 @@ def _build_batch_tab():
 
             with ui.row().classes('w-full gap-1'):
                 ui.button('Run Batch',  on_click=_run_batch,       icon='play_arrow').props(
-                    'flat color=green').classes('flex-1')
+                    'flat color=green stack').classes('flex-1').style('min-height:56px')
                 ui.button('Export CSV', on_click=_export_batch_csv, icon='download').props(
-                    'flat color=teal').classes('flex-1')
+                    'flat color=teal stack').classes('flex-1').style('min-height:56px')
                 ui.button('Clear', on_click=_clear_batch, icon='delete').props(
-                    'flat color=red size=sm')
+                    'flat color=red stack').classes('flex-1').style('min-height:56px')
 
             with _card('File List'):
                 file_list = ui.list().props('dense bordered').style(
