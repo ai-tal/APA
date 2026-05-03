@@ -215,14 +215,12 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
     fig.update_layout(
         **_LAYOUT_BASE,
         title=dict(text=f'Contour — {label}', font=dict(color=_FONT_COLOR)),
-        width=900,
-        height=900,
-        autosize=False,
         xaxis=_axis_style(
             title='φ (deg)',
             tickvals=list(range(0, 361, 30)),
             ticktext=[str(v) for v in range(0, 361, 30)],
             range=[0, 360],
+            constrain='domain',
         ),
         yaxis=_axis_style(
             title='θ (deg)',
@@ -230,8 +228,9 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
             tickvals=list(range(0, 181, 15)),
             ticktext=[str(v) for v in range(0, 181, 15)],
             range=[180, 0],
+            scaleanchor='x',
+            scaleratio=1,
         ),
-        yaxis_scaleanchor='x',
     )
     return fig
 
