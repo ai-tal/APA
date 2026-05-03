@@ -132,47 +132,73 @@ def main_page():
     ui.query('body').style(
         'background:#0d1117; color:#e0e0e0; font-family:Roboto,sans-serif')
 
-    # Light mode overrides — Quasar sets body--light when dark mode disabled
+    # Light mode: JS MutationObserver rewrites every inline style that uses dark colours.
+    # CSS class selectors can't override inline styles reliably, so we patch the DOM directly.
     ui.add_head_html('''<style>
-/* ── Light mode global overrides ── */
-.body--light { background:#f5f7fa !important; color:#24292f !important; }
+/* Base Quasar component overrides for light mode */
 .body--light .q-header  { background:#ffffff !important; border-color:#d0d7de !important; }
 .body--light .q-tabs    { background:#f0f2f5 !important; border-color:#d0d7de !important; }
 .body--light .q-tab-panels,
 .body--light .q-tab-panel { background:#f5f7fa !important; }
 .body--light .q-separator { background:#d0d7de !important; }
-/* Cards and panels keyed on inline bg colour */
-.body--light [style*="background:#161b22"] { background:#ffffff !important; border-color:#d0d7de !important; }
-.body--light [style*="background:#0d1117"] { background:#f5f7fa !important; }
-.body--light [style*="background:#1a1a2e"] { background:#f0f2f5 !important; }
-/* Scrollbar areas */
-.body--light [style*="background:#0d1117;"] { background:#f5f7fa !important; }
-/* Borders */
-.body--light [style*="border:1px solid #30363d"] { border-color:#d0d7de !important; }
-.body--light [style*="border-bottom:1px solid #30363d"] { border-color:#d0d7de !important; }
-/* Text colours */
-.body--light [style*="color:#8b949e"]  { color:#57606a !important; }
-.body--light [style*="color:#e0e0e0"]  { color:#24292f !important; }
-.body--light [style*="color:#58a6ff"]  { color:#0969da !important; }
-.body--light [style*="color:#4fc3f7"]  { color:#0288d1 !important; }
 .body--light .q-item__label--caption   { color:#57606a !important; }
 .body--light .q-item__label            { color:#24292f !important; }
-/* Tables */
-.body--light .q-table__container,
 .body--light .q-table th,
-.body--light .q-table td { background:#ffffff !important; color:#24292f !important;
-                            border-color:#d0d7de !important; }
-/* Inputs */
-.body--light .q-field__control,
+.body--light .q-table td { background:#ffffff !important; color:#24292f !important; border-color:#d0d7de !important; }
+.body--light .q-field__control { border-color:#d0d7de !important; }
 .body--light .q-field__native,
-.body--light .q-field__label { color:#24292f !important; }
-.body--light .q-field--outlined .q-field__control { border-color:#d0d7de !important; }
-/* Upload area */
-.body--light .q-uploader { background:#f0f2f5 !important; color:#24292f !important; }
-/* Scrollbar */
+.body--light .q-field__label  { color:#24292f !important; }
+.body--light .q-uploader       { background:#f0f2f5 !important; color:#24292f !important; }
 .body--light ::-webkit-scrollbar-thumb { background:#adb5bd; }
 .body--light ::-webkit-scrollbar-track { background:#e9ecef; }
-</style>''')
+</style>
+<script>
+/* Inline-style colour swap: dark ↔ light                                   */
+/* NiceGUI bakes colours into style="..." attributes which CSS cannot         */
+/* override without !important on the exact attribute value. JS is reliable. */
+window._apaLight = false;
+const _D2L = [
+  ['#161b22','#ffffff'], ['#0d1117','#f5f7fa'], ['#1a1a2e','#f0f2f5'],
+  ['#30363d','#d0d7de'], ['#8b949e','#57606a'], ['#e0e0e0','#24292f'],
+  ['#58a6ff','#0969da'], ['#4fc3f7','#0288d1'],
+];
+const _L2D = _D2L.map(([d,l]) => [l,d]);
+
+function _apaSwap(el, pairs) {
+  const s = el.getAttribute('style'); if (!s) return;
+  let ns = s;
+  pairs.forEach(([a,b]) => { ns = ns.split(a).join(b); });
+  if (ns !== s) el.setAttribute('style', ns);
+}
+
+function _apaPatchAll(pairs) {
+  document.querySelectorAll('[style]').forEach(el => _apaSwap(el, pairs));
+}
+
+function _apaToLight() {
+  window._apaLight = true;
+  _apaPatchAll(_D2L);
+  document.body.style.background = '#f5f7fa';
+  document.body.style.color      = '#24292f';
+}
+
+function _apaToDark() {
+  window._apaLight = false;
+  _apaPatchAll(_L2D);
+  document.body.style.background = '#0d1117';
+  document.body.style.color      = '#e0e0e0';
+}
+
+/* MutationObserver: auto-patch newly added nodes when in light mode */
+new MutationObserver(muts => {
+  if (!window._apaLight) return;
+  muts.forEach(m => m.addedNodes.forEach(n => {
+    if (n.nodeType !== 1) return;
+    _apaSwap(n, _D2L);
+    n.querySelectorAll && n.querySelectorAll('[style]').forEach(c => _apaSwap(c, _D2L));
+  }));
+}).observe(document.documentElement, { childList: true, subtree: true });
+</script>''')
 
     _dark = ui.dark_mode(value=True)
     _theme = {'dark': True}
@@ -189,10 +215,12 @@ def main_page():
                 _dark.enable()
                 _theme_icon.set_content(_MOON_SVG)
                 _theme_btn.style('color:#8b949e')
+                ui.run_javascript('_apaToDark()')
             else:
                 _dark.disable()
                 _theme_icon.set_content(_SUN_SVG)
                 _theme_btn.style('color:#ffd600')
+                ui.run_javascript('_apaToLight()')
 
         with ui.button(on_click=_toggle_theme).props('flat round dense').style(
                 'color:#8b949e; border:1px solid #30363d; border-radius:50%; '
@@ -792,9 +820,8 @@ def _build_coverage_tab():
                     cone_ang = ui.number('Half-angle (°)',  value=60.0, format='%.1f').props('dense dark outlined')
                 cone_col.set_visibility(False)
 
-                def _on_mode_change(e):
-                    val = e.args if isinstance(e.args, str) else str(e.args)
-                    cone_col.set_visibility('Conical' in val)
+                def _on_mode_change(_e=None):
+                    cone_col.set_visibility(cov_mode.value == 'Conical')
                 cov_mode.on('update:model-value', _on_mode_change)
 
                 ui.separator().style('background:#30363d')

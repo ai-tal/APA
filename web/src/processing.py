@@ -336,23 +336,37 @@ def _build_grid_cache(theta, phi, G_total, G_RHCP, G_LHCP, AR, PLF):
             is_regular = False
 
     if not is_regular:
-        from scipy.interpolate import griddata
-        # Cap grid dimensions so irregular/post-rotation data doesn't explode
+        from scipy.spatial import Delaunay
+        from scipy.interpolate import LinearNDInterpolator
+        # Cap output grid dimensions so post-rotation scattered data doesn't explode
         MAX_TH, MAX_PH = 181, 361
         th_u = np.linspace(float(theta.min()), float(theta.max()), min(nTh, MAX_TH))
         ph_u = np.linspace(0.0, 360.0, min(nPh, MAX_PH))
         nTh, nPh = len(th_u), len(ph_u)
 
         TH, PH = np.meshgrid(th_u, ph_u, indexing='ij')
-        pad_phi = np.concatenate([phi, phi - 360, phi + 360])
+        # Triplicate phi for wrap-around continuity
+        pad_phi = np.concatenate([phi, phi - 360.0, phi + 360.0])
         pad_th  = np.concatenate([theta, theta, theta])
+        pts = np.column_stack([pad_th, pad_phi])
+        xi  = np.column_stack([TH.ravel(), PH.ravel()])
+
+        # Build Delaunay triangulation ONCE and reuse for all 5 channels
+        try:
+            tri_del = Delaunay(pts)
+        except Exception:
+            tri_del = None
 
         def _gd(arr):
             pa = np.concatenate([arr, arr, arr])
-            return griddata((pad_th, pad_phi), pa,
-                            (TH.ravel(), PH.ravel()),
-                            method='linear',
-                            fill_value=float(np.nanmin(arr))).reshape(nTh, nPh)
+            fv = float(np.nanmin(pa))
+            if tri_del is not None:
+                itp = LinearNDInterpolator(tri_del, pa, fill_value=fv)
+                return itp(xi).reshape(nTh, nPh)
+            from scipy.interpolate import griddata
+            return griddata(pts, pa, xi, method='nearest',
+                            fill_value=fv).reshape(nTh, nPh)
+
         G_grid    = _gd(G_total)
         RHCP_grid = _gd(G_RHCP)
         LHCP_grid = _gd(G_LHCP)
@@ -551,12 +565,13 @@ def combine_patterns(patterns_R: list, method: str = 'incoherent',
     return R_comb
 
 
-def _build_regional_mask(TH_rad, PH_rad, mask_def: dict) -> np.ndarray:
-    """Build boolean mask array for regional combine."""
+def _build_regional_mask(TH_deg, PH_deg, mask_def: dict) -> np.ndarray:
+    """Build boolean mask array for regional combine.
+    TH_deg and PH_deg are already in degrees (same units as theta_vec / phi_vec)."""
     mask_type = mask_def.get('type', 'phi_range')
     v1 = float(mask_def.get('v1', 0))
     v2 = float(mask_def.get('v2', 360))
-    TH_d = np.rad2deg(TH_rad); PH_d = np.rad2deg(PH_rad)
+    TH_d = TH_deg; PH_d = PH_deg
     if mask_type == 'phi_range':
         if v1 <= v2:
             return (PH_d >= v1) & (PH_d <= v2)

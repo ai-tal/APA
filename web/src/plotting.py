@@ -44,21 +44,29 @@ def _wrap_phi(R: ProcessedPattern, grid: np.ndarray):
 
 
 def _cut_full360(R, cut_type, cut_value, component='Total Gain'):
-    """Return (angles, G_tot, G_R, G_L) for a full-360° cut.
-    Theta Cut: stitches forward (phi) + mirror (phi+180) halves.
-    Phi Cut:   returns the standard theta sweep 0–180.
+    """Return (angles, G_tot, G_R, G_L) for a full-360° cut, loop-closed.
+    Theta Cut: stitches forward (phi=cut_value) + mirror (phi=cut_value+180) halves.
+    Phi Cut:   full phi sweep 0-360° at fixed theta=cut_value, seam closed.
     """
     if cut_type == 'Theta Cut':
         a_f, Gt_f, Gr_f, Gl_f = get_cut(R, cut_type, cut_value)
         mirror = (cut_value + 180.0) % 360.0
         a_m, Gt_m, Gr_m, Gl_m = get_cut(R, cut_type, mirror)
-        a_s   = 360.0 - a_m[::-1][1:]
-        return (np.concatenate([a_f, a_s]),
-                np.concatenate([Gt_f, Gt_m[::-1][1:]]),
-                np.concatenate([Gr_f, Gr_m[::-1][1:]]),
-                np.concatenate([Gl_f, Gl_m[::-1][1:]]))
+        a_s = 360.0 - a_m[::-1][1:]
+        angles = np.concatenate([a_f, a_s])
+        Gt = np.concatenate([Gt_f, Gt_m[::-1][1:]])
+        Gr = np.concatenate([Gr_f, Gr_m[::-1][1:]])
+        Gl = np.concatenate([Gl_f, Gl_m[::-1][1:]])
     else:
-        return get_cut(R, cut_type, cut_value)
+        angles, Gt, Gr, Gl = get_cut(R, cut_type, cut_value)
+
+    # Close the loop: append first point at 360° if not already at 360
+    if len(angles) > 1 and angles[0] < 5.0 and angles[-1] < 359.5:
+        angles = np.append(angles, 360.0)
+        Gt = np.append(Gt, Gt[0])
+        Gr = np.append(Gr, Gr[0])
+        Gl = np.append(Gl, Gl[0])
+    return angles, Gt, Gr, Gl
 
 
 def _find_hpbw_crossings(angles: np.ndarray, G: np.ndarray):
@@ -242,10 +250,16 @@ def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
                 xref='paper', yref='paper', x=0.5, y=1.05,
                 showarrow=False, font=dict(color='#ffd600', size=11))
 
+    _ticks30 = list(range(0, 361, 30))
     fig.update_layout(
         **_LAYOUT_BASE,
         title=dict(text=f'Rect Cut — {cut_type} @ {cut_value:.1f}°', font=dict(color=_FONT_COLOR)),
-        xaxis=_axis_style(title=x_label),
+        xaxis=_axis_style(
+            title=x_label,
+            range=[0, 360],
+            tickvals=_ticks30,
+            ticktext=[str(v) for v in _ticks30],
+        ),
         yaxis=_axis_style(title='Gain (dB)', range=[cmin, cmax]),
         legend=dict(font=dict(color=_FONT_COLOR), bgcolor='rgba(0,0,0,0.3)'),
     )
@@ -317,8 +331,10 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
         zmin=cmin, zmax=cmax,
         colorscale=colorscale,
         zsmooth='best',
-        colorbar=dict(title=f'{component} (dB)', tickfont=dict(color=_FONT_COLOR),
-                      titlefont=dict(color=_FONT_COLOR)),
+        colorbar=dict(
+            title=dict(text=f'{component} (dB)', font=dict(color=_FONT_COLOR)),
+            tickfont=dict(color=_FONT_COLOR),
+        ),
         hovertemplate='φ=%{customdata:.1f}°<br>' + component + '=%{z:.2f} dB<extra></extra>',
         customdata=A_pix,
         showscale=True,
