@@ -389,8 +389,10 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
                             bounds_error=False, fill_value=0.0)
     G_boundary = boundary_fn(A_pix)                       # radius of pattern at each pixel angle
 
-    # dB value at each pixel = G(phi) for pixels inside the pattern boundary
-    G_val = np.where(R_pix <= G_boundary, boundary_fn(A_pix) + cmin, np.nan)
+    # Radial Gouraud interpolation: centre = cmin, boundary = gain at that angle.
+    # R_pix spans [0, G_boundary] where G_boundary = (gain_dB - cmin).
+    # So colour = cmin + R_pix gives cmin at centre and actual gain at edge.
+    G_val = np.where(R_pix <= G_boundary, cmin + R_pix, np.nan)
 
     # ── Colorscale: AR uses Red-White-Blue thermometer; others use Jet ──
     if component == 'Axial Ratio':
@@ -505,7 +507,9 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
 
     r_max = float(r.max())
     # customdata shape (nTh, nPh, 3): [theta_deg, phi_deg, gain_dB]
-    cd = np.stack([TH_deg, PH_deg, gw], axis=-1)
+    # Replace non-finite gain values so JSON serialises as numbers, not null
+    gw_cd = np.where(np.isfinite(gw), gw, cmin)
+    cd = np.stack([TH_deg, PH_deg, gw_cd], axis=-1)
 
     _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
                     title='', showaxeslabels=False, showbackground=False,
@@ -564,7 +568,8 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
     Y = np.sin(TH) * np.sin(PH)
     Z = np.cos(TH)
 
-    cd = np.stack([TH_deg, PH_deg, gw], axis=-1)
+    gw_cd = np.where(np.isfinite(gw), gw, cmin)
+    cd = np.stack([TH_deg, PH_deg, gw_cd], axis=-1)
 
     _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
                     title='', showaxeslabels=False, showbackground=False,

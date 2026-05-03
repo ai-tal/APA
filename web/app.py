@@ -764,6 +764,10 @@ def _build_batch_tab():
                 ).classes('w-full')
                 lbl_b_status = ui.label('0 files queued').style('color:#8b949e; font-size:0.78rem')
                 refs['lbl_status'] = lbl_b_status
+                prog_bar = ui.linear_progress(value=0, show_value=False).props(
+                    'rounded color=blue').style('height:6px')
+                prog_bar.set_visibility(False)
+                refs['progress'] = prog_bar
 
             with _card('Parameters'):
                 with ui.grid(columns=2).classes('w-full gap-1'):
@@ -800,9 +804,22 @@ def _build_batch_tab():
                 total = len(entries)
                 ok = 0
                 loop = asyncio.get_event_loop()
+                do_sph = bool(cb_sph.value)
+                do_con = bool(cb_con.value)
+
+                # ── Progress helpers ────────────────────────────────────────
+                # Phase weights: processing = 70 %, coverage = 30 %
+                _pb = refs['progress']
+                _pb.set_value(0); _pb.set_visibility(True)
+
+                def _prog(phase_frac, phase_weight=0.7, phase_offset=0.0):
+                    _pb.set_value(min(1.0, phase_offset + phase_weight * phase_frac))
+
+                # ── Phase 1: pattern processing ─────────────────────────────
                 refs['lbl_status'].set_text(f'Processing 0 / {total}…')
                 for i, ent in enumerate(entries):
                     refs['lbl_status'].set_text(f'Processing {i+1} / {total}…')
+                    _prog((i + 1) / total)
                     await asyncio.sleep(0)
                     if ent.get('P') and not ent.get('R'):
                         try:
@@ -813,9 +830,7 @@ def _build_batch_tab():
                         except Exception as ex:
                             ent['ok'] = False; ent['err'] = str(ex)
 
-                # Coverage computation
-                do_sph = bool(cb_sph.value)
-                do_con = bool(cb_con.value)
+                # ── Phase 2: coverage computation ───────────────────────────
                 ok_entries = [e for e in entries if e.get('ok') and e.get('R')]
                 if (do_sph or do_con) and ok_entries:
                     step  = max(float(cov_thr_step.value), 0.5)
@@ -828,6 +843,8 @@ def _build_batch_tab():
                     for ci, ent in enumerate(ok_entries):
                         refs['lbl_status'].set_text(
                             f'Coverage {ci+1} / {len(ok_entries)}…')
+                        _prog((ci + 1) / len(ok_entries),
+                              phase_weight=0.3, phase_offset=0.7)
                         await asyncio.sleep(0)
                         R_e = ent['R']
                         ent['cov_thr'] = thresholds
@@ -854,9 +871,12 @@ def _build_batch_tab():
 
                 refs['refresh_list'](refs['file_list'])
                 refs['refresh_summary'](refs['summary_plot'])
+                _pb.set_value(1.0)
                 refs['lbl_status'].set_text(f'{ok}/{total} processed — exporting…')
                 _notify(f'Batch complete: {ok}/{total} OK')
                 await _export_batch_csv()
+                _pb.set_visibility(False)
+                refs['lbl_status'].set_text(f'{ok}/{total} done')
 
             async def _export_batch_csv():
                 import zipfile, io as _bio
