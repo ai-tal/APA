@@ -507,14 +507,22 @@ def combine_patterns(patterns_R: list, method: str = 'incoherent',
         for gl in G_lin[1:]:
             G_comb_lin = np.maximum(G_comb_lin, gl)
     elif method == 'regional_mask':
-        G_comb_lin = G_lin[0].copy()
-        for k, gl in enumerate(G_lin[1:], start=1):
-            if masks and k - 1 < len(masks):
-                mask_def = masks[k - 1]
-                m = _build_regional_mask(TH, PH, mask_def)
-            else:
-                m = np.ones_like(G_comb_lin, dtype=bool)
-            G_comb_lin = np.where(m, gl, G_comb_lin)
+        if masks and len(masks) == len(G_lin):
+            # All N patterns have explicit masks.
+            # Apply in reverse order so earlier patterns take precedence.
+            G_comb_lin = G_lin[0].copy()   # fallback for uncovered points
+            for k in reversed(range(len(G_lin))):
+                m = _build_regional_mask(TH, PH, masks[k])
+                G_comb_lin = np.where(m, G_lin[k], G_comb_lin)
+        else:
+            # Legacy N-1 masks: pattern 1 is the base, patterns 2+ have masks.
+            G_comb_lin = G_lin[0].copy()
+            for k, gl in enumerate(G_lin[1:], start=1):
+                if masks and k - 1 < len(masks):
+                    m = _build_regional_mask(TH, PH, masks[k - 1])
+                else:
+                    m = np.ones_like(G_comb_lin, dtype=bool)
+                G_comb_lin = np.where(m, gl, G_comb_lin)
     else:
         G_comb_lin = sum(G_lin)
 
@@ -543,15 +551,26 @@ def _build_regional_mask(TH_rad, PH_rad, mask_def: dict) -> np.ndarray:
     """Build boolean mask array for regional combine."""
     mask_type = mask_def.get('type', 'phi_range')
     v1 = float(mask_def.get('v1', 0))
-    v2 = float(mask_def.get('v2', 180))
+    v2 = float(mask_def.get('v2', 360))
     TH_d = np.rad2deg(TH_rad); PH_d = np.rad2deg(PH_rad)
     if mask_type == 'phi_range':
-        return (PH_d >= v1) & (PH_d <= v2)
+        if v1 <= v2:
+            return (PH_d >= v1) & (PH_d <= v2)
+        else:  # wraps around 0/360
+            return (PH_d >= v1) | (PH_d <= v2)
     elif mask_type == 'theta_range':
         return (TH_d >= v1) & (TH_d <= v2)
     elif mask_type == 'hemisphere_upper':
         return TH_d <= 90
     elif mask_type == 'hemisphere_lower':
         return TH_d >= 90
+    elif mask_type == 'custom':
+        phi_min   = float(mask_def.get('phi_min',   0))
+        phi_max   = float(mask_def.get('phi_max', 360))
+        theta_min = float(mask_def.get('theta_min',  0))
+        theta_max = float(mask_def.get('theta_max', 180))
+        phi_ok = (PH_d >= phi_min) & (PH_d <= phi_max)
+        th_ok  = (TH_d >= theta_min) & (TH_d <= theta_max)
+        return phi_ok & th_ok
     else:
         return np.ones_like(TH_rad, dtype=bool)

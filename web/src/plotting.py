@@ -1,18 +1,16 @@
 """
 Plotly figure builders for all APA plot types.
-Contour, Polar Cut, Rect Cut, 3D Pattern, 3D Unit Sphere, Circular (azimuthal),
-Filled Polar — all returning go.Figure objects for NiceGUI ui.plotly().
 """
 import numpy as np
 import plotly.graph_objects as go
 from scipy.interpolate import RegularGridInterpolator
-from typing import Optional, Tuple
+from typing import Tuple
 from .processing import ProcessedPattern, get_component_grid, get_cut
 
 
 _COLORSCALE = 'Jet'
-_BG = '#1a1a2e'
-_PAPER = '#16213e'
+_BG         = '#1a1a2e'
+_PAPER      = '#16213e'
 _FONT_COLOR = '#e0e0e0'
 _GRID_COLOR = '#334466'
 
@@ -25,31 +23,77 @@ _LAYOUT_BASE = dict(
 
 
 def _axis_style(**kw):
-    return dict(gridcolor=_GRID_COLOR, zerolinecolor=_GRID_COLOR,
-                showgrid=True, **kw)
+    return dict(gridcolor=_GRID_COLOR, zerolinecolor=_GRID_COLOR, showgrid=True, **kw)
 
 
-def _3d_layout_base():
-    """_LAYOUT_BASE without margin, for 3-D scenes."""
-    return {k: v for k, v in _LAYOUT_BASE.items() if k != 'margin'}
+def _3d_layout():
+    base = {k: v for k, v in _LAYOUT_BASE.items() if k != 'margin'}
+    base['margin'] = dict(l=0, r=0, t=40, b=0)
+    return base
 
 
-# ---------------------------------------------------------------------------
-# Contour map: phi (x) vs theta (y), gain colour
-# ---------------------------------------------------------------------------
+def _wrap_phi(R: ProcessedPattern, grid: np.ndarray):
+    """Append phi=360 column so the seam closes — returns (phi_vec_w, grid_w)."""
+    pv = R.phi_vec
+    if pv[-1] < 359.9:
+        pv_w    = np.append(pv, 360.0)
+        grid_w  = np.concatenate([grid, grid[:, :1]], axis=1)
+    else:
+        pv_w, grid_w = pv, grid
+    return pv_w, grid_w
+
+
+def _cut_full360(R, cut_type, cut_value, component):
+    """Return (angles, G_tot, G_R, G_L) for a full-360° cut.
+    For Theta Cut: stitches forward (phi) + mirror (phi+180) halves.
+    For Phi Cut:   just returns the standard phi sweep 0–360.
+    """
+    if cut_type == 'Theta Cut':
+        a_f, Gt_f, Gr_f, Gl_f = get_cut(R, cut_type, cut_value)
+        mirror = (cut_value + 180.0) % 360.0
+        a_m, Gt_m, Gr_m, Gl_m = get_cut(R, cut_type, mirror)
+        a_s   = 360.0 - a_m[::-1][1:]
+        return (np.concatenate([a_f, a_s]),
+                np.concatenate([Gt_f, Gt_m[::-1][1:]]),
+                np.concatenate([Gr_f, Gr_m[::-1][1:]]),
+                np.concatenate([Gl_f, Gl_m[::-1][1:]]))
+    else:
+        return get_cut(R, cut_type, cut_value)
+
+
+def _xyz_axes(r_scale: float, colorX='#ff4444', colorY='#44ff44', colorZ='#4fc3f7'):
+    """Return three Scatter3d traces for X, Y, Z principal axes."""
+    axes = []
+    for vec, col, lbl in [([r_scale, 0, 0], colorX, 'X'),
+                           ([0, r_scale, 0], colorY, 'Y'),
+                           ([0, 0, r_scale], colorZ, 'Z')]:
+        axes.append(go.Scatter3d(
+            x=[0, vec[0]], y=[0, vec[1]], z=[0, vec[2]],
+            mode='lines+text',
+            text=['', lbl],
+            textfont=dict(color=col, size=12),
+            textposition='top center',
+            line=dict(color=col, width=4),
+            showlegend=False, hoverinfo='skip',
+        ))
+    return axes
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Contour (Heatmap) — phi (x) vs theta (y)
+# ─────────────────────────────────────────────────────────────────────────────
 def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
                  cmin: float = None, cmax: float = None,
                  show_peak: bool = True) -> go.Figure:
     grid, label = get_component_grid(R, component)
-    if cmax is None:
-        cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None:
-        cmin = cmax - 50
+    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+    if cmin is None: cmin = cmax - 50
+
+    pv, gw = _wrap_phi(R, grid)   # close the phi=360 seam
 
     fig = go.Figure(go.Heatmap(
-        x=R.phi_vec, y=R.theta_vec, z=grid,
-        zmin=cmin, zmax=cmax,
-        colorscale=_COLORSCALE,
+        x=pv, y=R.theta_vec, z=gw,
+        zmin=cmin, zmax=cmax, colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         hovertemplate='φ=%{x:.1f}°<br>θ=%{y:.1f}°<br>' + label + '=%{z:.2f}<extra></extra>',
     ))
@@ -59,88 +103,55 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
             x=[R.max_gain_dir[1]], y=[R.max_gain_dir[0]],
             mode='markers+text',
             marker=dict(symbol='cross', size=12, color='white', line=dict(width=2)),
-            text=[f'{R.max_gain_dB:.1f} dBi'],
-            textposition='top right',
+            text=[f'{R.max_gain_dB:.1f} dBi'], textposition='top right',
             textfont=dict(color='white', size=10),
             showlegend=False, name='Peak',
         ))
-
-    # Fixed ticks: phi 0–360 step 30, theta 0–180 step 15
-    phi_ticks   = list(range(0, 361, 30))
-    theta_ticks = list(range(0, 181, 15))
 
     fig.update_layout(
         **_LAYOUT_BASE,
         title=dict(text=f'Contour — {label}', font=dict(color=_FONT_COLOR)),
         xaxis=_axis_style(
             title='φ (deg)',
-            tickvals=phi_ticks,
-            ticktext=[str(v) for v in phi_ticks],
+            tickvals=list(range(0, 361, 30)),
+            ticktext=[str(v) for v in range(0, 361, 30)],
             range=[0, 360],
         ),
         yaxis=_axis_style(
             title='θ (deg)',
             autorange='reversed',
-            tickvals=theta_ticks,
-            ticktext=[str(v) for v in theta_ticks],
+            tickvals=list(range(0, 181, 15)),
+            ticktext=[str(v) for v in range(0, 181, 15)],
             range=[180, 0],
         ),
     )
     return fig
 
 
-# ---------------------------------------------------------------------------
-# Polar cut: vary phi at fixed theta, or vary theta at fixed phi
-# For Theta Cut, mirror the back side to create a full 360° cut.
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Polar cut — single 1-D Scatterpolar trace
+# ─────────────────────────────────────────────────────────────────────────────
 def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
-                   cut_value: float = 0.0,
-                   component: str = 'Total Gain',
+                   cut_value: float = 0.0, component: str = 'Total Gain',
                    cmin: float = None, cmax: float = None,
                    show_hpbw: bool = False) -> go.Figure:
-    if cmax is None:
-        cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None:
-        cmin = cmax - 50
+    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+    if cmin is None: cmin = cmax - 50
 
-    comp_map_key = component
-
-    if cut_type == 'Theta Cut':
-        # Forward side: theta 0→180 at phi=cut_value
-        angles_f, G_tot_f, G_R_f, G_L_f = get_cut(R, cut_type, cut_value)
-        # Mirror side: theta 0→180 at phi=(cut_value+180)%360
-        mirror_phi = (cut_value + 180.0) % 360.0
-        angles_m, G_tot_m, G_R_m, G_L_m = get_cut(R, cut_type, mirror_phi)
-        # Build full 360°: forward (0→180) then mirror reversed (180→360)
-        # mirror reversed: theta 180→0 → polar angles 180→360
-        ang_second  = 360.0 - angles_m[::-1][1:]
-        angles  = np.concatenate([angles_f, ang_second])
-        G_tot   = np.concatenate([G_tot_f, G_tot_m[::-1][1:]])
-        G_R     = np.concatenate([G_R_f,   G_R_m[::-1][1:]])
-        G_L     = np.concatenate([G_L_f,   G_L_m[::-1][1:]])
-    else:
-        angles, G_tot, G_R, G_L = get_cut(R, cut_type, cut_value)
-
+    angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, component)
     comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
-    G_plot = comp_data.get(comp_map_key, G_tot)
-    G_clipped = np.clip(G_plot, cmin, cmax)
-    shift  = -cmin
-    r_vals = G_clipped + shift
+    G_plot    = comp_data.get(component, G_tot)
+    r_vals    = np.clip(G_plot, cmin, cmax) - cmin
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(
-        r=r_vals, theta=angles,
-        mode='lines',
-        line=dict(color='#4fc3f7', width=2),
-        name=component,
+    tick_vals = list(range(0, int(cmax - cmin) + 10, 10))
+    tick_text = [f'{v + cmin:.0f}' for v in tick_vals]
+
+    fig = go.Figure(go.Scatterpolar(
+        r=r_vals, theta=angles, mode='lines',
+        line=dict(color='#4fc3f7', width=2), name=component,
         hovertemplate='%{theta:.1f}°: %{customdata:.2f} dB<extra></extra>',
         customdata=G_plot,
     ))
-
-    tick_step = 10
-    tick_vals = np.arange(0, (cmax - cmin) + tick_step, tick_step)
-    tick_text = [f'{v + cmin:.0f}' for v in tick_vals]
-
     fig.update_layout(
         **_LAYOUT_BASE,
         title=dict(text=f'Polar Cut — {cut_type} @ {cut_value}°', font=dict(color=_FONT_COLOR)),
@@ -149,51 +160,34 @@ def plot_polar_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
             angularaxis=dict(tickcolor=_FONT_COLOR, gridcolor=_GRID_COLOR,
                              direction='clockwise', rotation=90,
                              tickfont=dict(color=_FONT_COLOR)),
-            radialaxis=dict(tickvals=tick_vals.tolist(), ticktext=tick_text,
-                            gridcolor=_GRID_COLOR,
-                            tickfont=dict(color=_FONT_COLOR),
+            radialaxis=dict(tickvals=tick_vals, ticktext=tick_text,
+                            gridcolor=_GRID_COLOR, tickfont=dict(color=_FONT_COLOR),
                             range=[0, cmax - cmin]),
         ),
     )
     return fig
 
 
-# ---------------------------------------------------------------------------
-# Rectangular cut: 1-D line plot — theta cut shows full 360° mirror
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Rectangular cut
+# ─────────────────────────────────────────────────────────────────────────────
 def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
                   cut_value: float = 0.0,
                   cmin: float = None, cmax: float = None,
                   show_hpbw: bool = True) -> go.Figure:
-    if cmax is None:
-        cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None:
-        cmin = cmax - 50
+    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+    if cmin is None: cmin = cmax - 50
 
-    if cut_type == 'Theta Cut':
-        # Forward side
-        angles_f, G_tot_f, G_R_f, G_L_f = get_cut(R, cut_type, cut_value)
-        # Mirror side
-        mirror_phi = (cut_value + 180.0) % 360.0
-        angles_m, G_tot_m, G_R_m, G_L_m = get_cut(R, cut_type, mirror_phi)
-        # Second half: theta going 180→0, angles 180→360
-        ang_second = 360.0 - angles_m[::-1][1:]
-        angles  = np.concatenate([angles_f, ang_second])
-        G_tot   = np.concatenate([G_tot_f, G_tot_m[::-1][1:]])
-        G_R     = np.concatenate([G_R_f,   G_R_m[::-1][1:]])
-        G_L     = np.concatenate([G_L_f,   G_L_m[::-1][1:]])
-        x_label = 'θ (deg) — full 360° cut'
-    else:
-        angles, G_tot, G_R, G_L = get_cut(R, cut_type, cut_value)
-        x_label = 'φ (deg)' if cut_type == 'Phi Cut' else 'θ (deg)'
+    angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, 'Total Gain')
+    x_label = ('θ (deg) — full 360° cut' if cut_type == 'Theta Cut'
+                else 'φ (deg)')
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=angles, y=G_tot, mode='lines',
-                             line=dict(color='#4fc3f7', width=2), name='Total'))
-    fig.add_trace(go.Scatter(x=angles, y=G_R, mode='lines',
-                             line=dict(color='#ef5350', width=1.5, dash='dash'), name='RHCP'))
-    fig.add_trace(go.Scatter(x=angles, y=G_L, mode='lines',
-                             line=dict(color='#66bb6a', width=1.5, dash='dot'), name='LHCP'))
+    for G, nm, col, dash in [(G_tot, 'Total', '#4fc3f7', 'solid'),
+                              (G_R,   'RHCP',  '#ef5350', 'dash'),
+                              (G_L,   'LHCP',  '#66bb6a', 'dot')]:
+        fig.add_trace(go.Scatter(x=angles, y=G, mode='lines', name=nm,
+                                 line=dict(color=col, width=2, dash=dash)))
 
     if show_hpbw and len(G_tot) > 2:
         half = float(G_tot.max()) - 3.0
@@ -210,102 +204,153 @@ def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
     return fig
 
 
-# ---------------------------------------------------------------------------
-# 3-D Antenna Pattern — radius = gain (shape shows radiation pattern)
-# ---------------------------------------------------------------------------
-def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
-                    cmin: float = None, cmax: float = None) -> go.Figure:
-    grid, label = get_component_grid(R, component)
-    if cmax is None:
-        cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None:
-        cmin = cmax - 50
+# ─────────────────────────────────────────────────────────────────────────────
+# Filled Polar — filled version of a polar cut (single cut, full 360°)
+# ─────────────────────────────────────────────────────────────────────────────
+def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
+                      cut_type: str = 'Phi Cut', cut_value: float = 0.0,
+                      cmin: float = None, cmax: float = None) -> go.Figure:
+    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+    if cmin is None: cmin = cmax - 50
 
-    TH_deg, PH_deg = np.meshgrid(R.theta_vec, R.phi_vec, indexing='ij')
-    TH = np.deg2rad(TH_deg)
-    PH = np.deg2rad(PH_deg)
+    angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, component)
+    comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
+    G_plot    = comp_data.get(component, G_tot)
+    r_vals    = np.clip(G_plot, cmin, cmax) - cmin
 
-    G_clipped = np.clip(grid, cmin, cmax)
-    r = G_clipped - cmin + 0.01  # keep ≥ 0.01 so sphere doesn't collapse
+    # Close the polygon
+    r_closed = np.append(r_vals, r_vals[0])
+    a_closed = np.append(angles,  angles[0])
 
-    X = r * np.sin(TH) * np.cos(PH)
-    Y = r * np.sin(TH) * np.sin(PH)
-    Z = r * np.cos(TH)
+    tick_vals = list(range(0, int(cmax - cmin) + 10, 10))
+    tick_text = [f'{v + cmin:.0f}' for v in tick_vals]
 
-    hover_text = np.array([
-        [f'θ={TH_deg[i, j]:.1f}°  φ={PH_deg[i, j]:.1f}°  {label}={grid[i, j]:.2f}'
-         for j in range(grid.shape[1])]
-        for i in range(grid.shape[0])
-    ])
-
-    fig = go.Figure(go.Surface(
-        x=X, y=Y, z=Z,
-        surfacecolor=grid, cmin=cmin, cmax=cmax,
-        colorscale=_COLORSCALE,
-        colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
-        text=hover_text,
-        hovertemplate='%{text}<extra></extra>',
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=r_closed, theta=a_closed, mode='lines',
+        fill='toself', fillcolor='rgba(79,195,247,0.22)',
+        line=dict(color='#4fc3f7', width=2),
+        name=component,
+        hovertemplate='%{theta:.1f}°: %{customdata:.2f} dB<extra></extra>',
+        customdata=np.append(G_plot, G_plot[0]),
     ))
+
     fig.update_layout(
-        **_3d_layout_base(),
-        title=dict(text=f'3D Pattern — {label}', font=dict(color=_FONT_COLOR)),
-        scene=dict(
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-            zaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
+        **_LAYOUT_BASE,
+        title=dict(text=f'Filled Polar — {cut_type} @ {cut_value}°', font=dict(color=_FONT_COLOR)),
+        polar=dict(
             bgcolor=_BG,
-            aspectmode='data',
+            angularaxis=dict(tickcolor=_FONT_COLOR, gridcolor=_GRID_COLOR,
+                             direction='clockwise', rotation=90,
+                             tickfont=dict(color=_FONT_COLOR)),
+            radialaxis=dict(tickvals=tick_vals, ticktext=tick_text,
+                            gridcolor=_GRID_COLOR, tickfont=dict(color=_FONT_COLOR),
+                            range=[0, cmax - cmin]),
         ),
-        margin=dict(l=0, r=0, t=40, b=0),
     )
     return fig
 
 
-# ---------------------------------------------------------------------------
-# 3-D Unit Sphere — projects pattern as colour on a unit sphere
-# ---------------------------------------------------------------------------
-def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
-                   cmin: float = None, cmax: float = None) -> go.Figure:
+# ─────────────────────────────────────────────────────────────────────────────
+# 3-D Pattern — radius = gain
+# ─────────────────────────────────────────────────────────────────────────────
+def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
+                    cmin: float = None, cmax: float = None) -> go.Figure:
     grid, label = get_component_grid(R, component)
-    if cmax is None:
-        cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None:
-        cmin = cmax - 50
+    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+    if cmin is None: cmin = cmax - 50
 
-    TH_deg, PH_deg = np.meshgrid(R.theta_vec, R.phi_vec, indexing='ij')
-    TH = np.deg2rad(TH_deg)
-    PH = np.deg2rad(PH_deg)
+    pv, gw = _wrap_phi(R, grid)
+    TH_deg, PH_deg = np.meshgrid(R.theta_vec, pv, indexing='ij')
+    TH = np.deg2rad(TH_deg); PH = np.deg2rad(PH_deg)
 
-    # Unit sphere
-    X = np.sin(TH) * np.cos(PH)
-    Y = np.sin(TH) * np.sin(PH)
-    Z = np.cos(TH)
+    r = np.clip(gw, cmin, cmax) - cmin + 0.01
+    X = r * np.sin(TH) * np.cos(PH)
+    Y = r * np.sin(TH) * np.sin(PH)
+    Z = r * np.cos(TH)
 
-    hover_text = np.array([
-        [f'θ={TH_deg[i, j]:.1f}°  φ={PH_deg[i, j]:.1f}°  {label}={grid[i, j]:.2f}'
-         for j in range(grid.shape[1])]
-        for i in range(grid.shape[0])
-    ])
+    r_max = float(r.max())
+    hover_text = [
+        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f}'
+         for j in range(gw.shape[1])]
+        for i in range(gw.shape[0])
+    ]
 
-    fig = go.Figure(go.Surface(
+    fig = go.Figure()
+    fig.add_trace(go.Surface(
         x=X, y=Y, z=Z,
-        surfacecolor=grid, cmin=cmin, cmax=cmax,
+        surfacecolor=gw, cmin=cmin, cmax=cmax,
         colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         text=hover_text,
         hovertemplate='%{text}<extra></extra>',
     ))
+    for ax in _xyz_axes(r_max * 1.25):
+        fig.add_trace(ax)
+
     fig.update_layout(
-        **_3d_layout_base(),
-        title=dict(text=f'3D Unit Sphere — {label}', font=dict(color=_FONT_COLOR)),
+        **_3d_layout(),
+        title=dict(text=f'3D Pattern — {label}', font=dict(color=_FONT_COLOR)),
         scene=dict(
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-            zaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-            bgcolor=_BG,
-            aspectmode='cube',
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                       title='', showaxeslabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                       title='', showaxeslabels=False),
+            zaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                       title='', showaxeslabels=False),
+            bgcolor=_BG, aspectmode='data',
         ),
-        margin=dict(l=0, r=0, t=40, b=0),
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3-D Spherical — unit sphere coloured by gain
+# ─────────────────────────────────────────────────────────────────────────────
+def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
+                   cmin: float = None, cmax: float = None) -> go.Figure:
+    grid, label = get_component_grid(R, component)
+    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+    if cmin is None: cmin = cmax - 50
+
+    pv, gw = _wrap_phi(R, grid)
+    TH_deg, PH_deg = np.meshgrid(R.theta_vec, pv, indexing='ij')
+    TH = np.deg2rad(TH_deg); PH = np.deg2rad(PH_deg)
+
+    X = np.sin(TH) * np.cos(PH)
+    Y = np.sin(TH) * np.sin(PH)
+    Z = np.cos(TH)
+
+    hover_text = [
+        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f}'
+         for j in range(gw.shape[1])]
+        for i in range(gw.shape[0])
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(go.Surface(
+        x=X, y=Y, z=Z,
+        surfacecolor=gw, cmin=cmin, cmax=cmax,
+        colorscale=_COLORSCALE,
+        colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
+        text=hover_text,
+        hovertemplate='%{text}<extra></extra>',
+    ))
+    for ax in _xyz_axes(1.35):
+        fig.add_trace(ax)
+
+    fig.update_layout(
+        **_3d_layout(),
+        title=dict(text=f'3D Spherical — {label}', font=dict(color=_FONT_COLOR)),
+        scene=dict(
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                       title='', showaxeslabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                       title='', showaxeslabels=False),
+            zaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                       title='', showaxeslabels=False),
+            bgcolor=_BG, aspectmode='cube',
+        ),
     )
     return fig
 
@@ -315,159 +360,91 @@ def plot_3d_spherical(R, component='Total Gain', cmin=None, cmax=None):
     return plot_3d_pattern(R, component, cmin, cmax)
 
 
-# ---------------------------------------------------------------------------
-# Circular (azimuthal equidistant) — polar projection where r=theta
-# Uses RegularGridInterpolator → Heatmap for speed (no griddata crash).
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Circular (azimuthal equidistant) — phi=0 at top, clockwise
+# x = θ·sin(φ),  y = θ·cos(φ)   →  φ=0 → top,  φ=90 → right  (CW)
+# ─────────────────────────────────────────────────────────────────────────────
 def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
                   cmin: float = None, cmax: float = None) -> go.Figure:
     grid, label = get_component_grid(R, component)
-    if cmax is None:
-        cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None:
-        cmin = cmax - 50
+    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+    if cmin is None: cmin = cmax - 50
 
     th_max = float(R.theta_vec.max())
-    N = 400  # Cartesian grid resolution
+    N = 400
 
-    # Cartesian axes (x = theta*cos(phi), y = theta*sin(phi))
+    # Cartesian CW convention: x = θ·sin(φ),  y = θ·cos(φ)
     xi = np.linspace(-th_max, th_max, N)
     yi = np.linspace(-th_max, th_max, N)
     XI, YI = np.meshgrid(xi, yi)
 
-    # Convert Cartesian → polar
     TH_i = np.sqrt(XI ** 2 + YI ** 2)
-    PH_i = np.rad2deg(np.arctan2(YI, XI)) % 360.0  # [0, 360)
+    # atan2(x, y) gives azimuth measured CW from +y (= north/top)
+    PH_i = np.rad2deg(np.arctan2(XI, YI)) % 360.0
 
-    # Fast bilinear interpolation on the regular (theta, phi) grid
-    phi_vec_safe = R.phi_vec.copy()
-    # Wrap phi so interpolator covers 0–360 seamlessly
-    if phi_vec_safe[-1] < 359.9:
-        phi_vec_safe = np.append(phi_vec_safe, 360.0)
-        grid_wrap = np.concatenate([grid, grid[:, :1]], axis=1)
-    else:
-        grid_wrap = grid
-
+    # Interpolate on the regular (theta, phi) grid, seam-wrapped
+    pv, gw = _wrap_phi(R, grid)
     interp = RegularGridInterpolator(
-        (R.theta_vec, phi_vec_safe), grid_wrap,
+        (R.theta_vec, pv), gw,
         method='linear', bounds_error=False, fill_value=np.nan)
 
-    pts = np.column_stack([TH_i.ravel(), PH_i.ravel()])
-    G_i = interp(pts).reshape(N, N)
-    G_i[TH_i > th_max] = np.nan  # mask outside hemisphere
+    pts  = np.column_stack([TH_i.ravel(), PH_i.ravel()])
+    G_i  = interp(pts).reshape(N, N)
+    G_i[TH_i > th_max] = np.nan
 
     fig = go.Figure(go.Heatmap(
         x=xi, y=yi, z=G_i,
-        zmin=cmin, zmax=cmax,
-        colorscale=_COLORSCALE,
+        zmin=cmin, zmax=cmax, colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
-        hovertemplate='x=%{x:.1f}°<br>y=%{y:.1f}°<br>' + label + '=%{z:.2f}<extra></extra>',
+        hovertemplate='x=%{x:.1f}<br>y=%{y:.1f}<br>' + label + '=%{z:.2f}<extra></extra>',
     ))
 
-    # Concentric theta rings + labels
     ph_ring = np.linspace(0, 2 * np.pi, 361)
     for thr_ring in [30, 60, 90, 120, 150, 180]:
-        if thr_ring > th_max * 1.01:
-            break
+        if thr_ring > th_max * 1.01: break
+        # ring in CW coords: x=r*sin, y=r*cos
         fig.add_trace(go.Scatter(
-            x=thr_ring * np.cos(ph_ring),
-            y=thr_ring * np.sin(ph_ring),
-            mode='lines',
-            line=dict(color='rgba(255,255,255,0.18)', width=0.8),
-            showlegend=False, hoverinfo='skip',
-        ))
-        fig.add_annotation(
-            x=0, y=thr_ring + 3, text=f'{thr_ring}°',
-            showarrow=False,
-            font=dict(color='rgba(255,255,255,0.55)', size=9),
-        )
+            x=thr_ring * np.sin(ph_ring), y=thr_ring * np.cos(ph_ring),
+            mode='lines', line=dict(color='rgba(255,255,255,0.18)', width=0.8),
+            showlegend=False, hoverinfo='skip'))
+        fig.add_annotation(x=0, y=thr_ring + 3, text=f'{thr_ring}°',
+                           showarrow=False,
+                           font=dict(color='rgba(255,255,255,0.55)', size=9))
 
-    # Cardinal phi labels
-    for ang_deg, txt in [(0, '0°'), (90, '90°'), (180, '180°'), (270, '270°')]:
-        r_lbl = th_max * 1.08
+    # Cardinal labels: phi=0 top, phi=90 right, phi=180 bottom, phi=270 left
+    for ph_lbl, txt in [(0, 'φ=0°'), (90, 'φ=90°'), (180, 'φ=180°'), (270, 'φ=270°')]:
+        r_lbl = th_max * 1.1
         fig.add_annotation(
-            x=r_lbl * np.cos(np.deg2rad(ang_deg)),
-            y=r_lbl * np.sin(np.deg2rad(ang_deg)),
+            x=r_lbl * np.sin(np.deg2rad(ph_lbl)),
+            y=r_lbl * np.cos(np.deg2rad(ph_lbl)),
             text=txt, showarrow=False,
-            font=dict(color=_FONT_COLOR, size=9),
-        )
+            font=dict(color=_FONT_COLOR, size=9))
 
     fig.update_layout(
         **_LAYOUT_BASE,
         title=dict(text=f'Circular (Azimuthal) — {label}', font=dict(color=_FONT_COLOR)),
-        xaxis=_axis_style(title='x = θ·cos(φ)  [deg]', scaleanchor='y',
-                          showticklabels=True),
-        yaxis=_axis_style(title='y = θ·sin(φ)  [deg]', showticklabels=True),
+        xaxis=_axis_style(title='θ·sin(φ)  [deg]', scaleanchor='y'),
+        yaxis=_axis_style(title='θ·cos(φ)  [deg]'),
     )
     return fig
 
 
-# ---------------------------------------------------------------------------
-# Filled polar (multiple phi cuts as fill traces)
-# ---------------------------------------------------------------------------
-def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
-                      cmin: float = None, cmax: float = None) -> go.Figure:
-    grid, label = get_component_grid(R, component)
-    if cmax is None:
-        cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None:
-        cmin = cmax - 50
-
-    fig = go.Figure()
-    n_traces = min(len(R.phi_vec), 36)
-    step = max(1, len(R.phi_vec) // n_traces)
-    cmap = _jet_colormap(n_traces)
-
-    for i, k in enumerate(range(0, len(R.phi_vec), step)):
-        ph = R.phi_vec[k]
-        g = np.clip(grid[:, k], cmin, cmax) - cmin
-        color = f'rgba({cmap[i][0]},{cmap[i][1]},{cmap[i][2]},0.6)'
-        fig.add_trace(go.Scatterpolar(
-            r=np.concatenate([[0], g, [0]]),
-            theta=np.concatenate([[0], R.theta_vec, [0]]),
-            mode='lines', fill='toself',
-            fillcolor=color, line=dict(color=color, width=0.5),
-            name=f'φ={ph:.0f}°', showlegend=(i < 6),
-        ))
-
-    fig.update_layout(
-        **_LAYOUT_BASE,
-        title=dict(text=f'Filled Polar — {label}', font=dict(color=_FONT_COLOR)),
-        polar=dict(
-            bgcolor=_BG,
-            angularaxis=dict(tickcolor=_FONT_COLOR, gridcolor=_GRID_COLOR,
-                             tickfont=dict(color=_FONT_COLOR)),
-            radialaxis=dict(gridcolor=_GRID_COLOR, tickfont=dict(color=_FONT_COLOR)),
-        ),
-        legend=dict(font=dict(color=_FONT_COLOR), bgcolor='rgba(0,0,0,0.3)'),
-    )
-    return fig
-
-
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Coverage CDF
-# ---------------------------------------------------------------------------
-def plot_coverage_cdf(thresholds, coverage_list: list,
-                      names: list) -> go.Figure:
-    """
-    thresholds: a single np.ndarray (shared) or a list of arrays (one per pattern).
-    coverage_list: list of arrays (fraction 0–1).
-    names: list of str.
-    """
-    if isinstance(thresholds, np.ndarray):
-        thr_list = [thresholds] * len(coverage_list)
-    else:
-        thr_list = list(thresholds)
+# ─────────────────────────────────────────────────────────────────────────────
+def plot_coverage_cdf(thresholds, coverage_list: list, names: list) -> go.Figure:
+    """thresholds: single ndarray or list of arrays; coverage_list: list of fraction arrays."""
+    thr_list = [thresholds] * len(coverage_list) if isinstance(thresholds, np.ndarray) \
+               else list(thresholds)
 
     colors = ['#4fc3f7', '#ef5350', '#66bb6a', '#ffa726', '#ab47bc',
               '#26c6da', '#d4e157', '#ff7043', '#78909c', '#ec407a']
     fig = go.Figure()
     for i, (thr, cov, nm) in enumerate(zip(thr_list, coverage_list, names)):
-        c = colors[i % len(colors)]
         fig.add_trace(go.Scatter(
             x=np.asarray(thr), y=np.asarray(cov) * 100,
             mode='lines', name=nm,
-            line=dict(color=c, width=2),
+            line=dict(color=colors[i % len(colors)], width=2),
             hovertemplate='Thr=%{x:.1f} dBi<br>Coverage=%{y:.1f}%<extra></extra>',
         ))
     fig.update_layout(
@@ -480,13 +457,12 @@ def plot_coverage_cdf(thresholds, coverage_list: list,
     return fig
 
 
-# ---------------------------------------------------------------------------
-# Batch summary bar chart
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Batch summary bar
+# ─────────────────────────────────────────────────────────────────────────────
 def plot_batch_summary(names: list, peak_gains: list) -> go.Figure:
     fig = go.Figure(go.Bar(
-        x=names, y=peak_gains,
-        marker_color='#4fc3f7',
+        x=names, y=peak_gains, marker_color='#4fc3f7',
         hovertemplate='%{x}<br>Peak Gain=%{y:.2f} dBi<extra></extra>',
     ))
     fig.update_layout(
@@ -498,20 +474,9 @@ def plot_batch_summary(names: list, peak_gains: list) -> go.Figure:
     return fig
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Utility
-# ---------------------------------------------------------------------------
-def _jet_colormap(n: int) -> list:
-    result = []
-    for i in range(n):
-        t = i / max(n - 1, 1)
-        r = int(np.clip(1.5 - abs(4 * t - 3), 0, 1) * 255)
-        g = int(np.clip(1.5 - abs(4 * t - 2), 0, 1) * 255)
-        b = int(np.clip(1.5 - abs(4 * t - 1), 0, 1) * 255)
-        result.append((r, g, b))
-    return result
-
-
+# ─────────────────────────────────────────────────────────────────────────────
 def auto_clim(max_gain_dB: float) -> Tuple[float, float]:
     cmax = float(np.ceil(max_gain_dB / 5) * 5)
     if cmax < max_gain_dB:
