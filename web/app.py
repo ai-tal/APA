@@ -24,7 +24,6 @@ from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
 
 # ── Download store: large files served via HTTP endpoint, not WebSocket ───────
 _DL_STORE: dict[str, bytes] = {}
-_TBL_DISP = 10_000   # max rows sent to browser tables; all rows kept server-side for export
 
 @app.get('/api/dl/{token}')
 async def _dl_endpoint(token: str):
@@ -64,8 +63,9 @@ _state = dict(
 # Tab references — filled in main_page() so send-to buttons can navigate
 _ui_tabs = {}
 
-COMPONENTS = ['Total Gain', 'RHCP Gain', 'LHCP Gain', 'Axial Ratio', 'PLF']
-CUT_TYPES  = ['Phi Cut', 'Theta Cut']
+COMPONENTS   = ['Total Gain', 'RHCP Gain', 'LHCP Gain', 'Axial Ratio', 'PLF']
+CUT_TYPES    = ['Phi Cut', 'Theta Cut']
+PLANE_MODES  = ['E-Plane', 'H-Plane', 'Custom']
 
 FULL_PLOT_TYPES = ['Contour', 'Circular', '3D Pattern', '3D Spherical']
 CUT_PLOT_TYPES  = ['Polar Cut', 'Rect Cut', 'Filled Polar']
@@ -467,6 +467,10 @@ def _build_single_tab():
                     'dense outlined').style('min-width:128px')
                 plot_dd  = ui.select(PLOT_TYPES, value='Contour', label='Plot Type').props(
                     'dense outlined').style('min-width:140px')
+                plane_mode = ui.select(PLANE_MODES, value='E-Plane', label='Plane Mode').props(
+                    'dense outlined').style('min-width:120px')
+                lbl_plane_info = ui.label('').style(
+                    'font-size:11px; color:#90caf9; align-self:center; white-space:nowrap')
                 cut_type = ui.select(CUT_TYPES, value='Phi Cut', label='Cut Type').props(
                     'dense outlined').style('min-width:106px')
                 cut_val  = ui.number('Cut Value (°)', value=0.0, format='%.1f',
@@ -485,14 +489,19 @@ def _build_single_tab():
                 cb_hpbw = ui.checkbox('HPBW', value=False).props('color=yellow')
 
                 def _update_controls_visibility():
-                    is_cut = plot_dd.value in CUT_PLOT_TYPES
+                    is_cut    = plot_dd.value in CUT_PLOT_TYPES
                     is_1d_cut = plot_dd.value in ('Polar Cut', 'Rect Cut')
-                    cut_type.set_visibility(is_cut)
-                    cut_val.set_visibility(is_cut)
+                    is_custom = plane_mode.value == 'Custom'
+                    plane_mode.set_visibility(is_cut)
+                    lbl_plane_info.set_visibility(is_cut and not is_custom)
+                    cut_type.set_visibility(is_cut and is_custom)
+                    cut_val.set_visibility(is_cut and is_custom)
                     cut_comp.set_visibility(is_1d_cut)
                     cb_hpbw.set_visibility(is_1d_cut)
 
                 # Initial visibility (Contour = no cut controls)
+                plane_mode.set_visibility(False)
+                lbl_plane_info.set_visibility(False)
                 cut_type.set_visibility(False)
                 cut_val.set_visibility(False)
                 cut_comp.set_visibility(False)
@@ -512,6 +521,7 @@ def _build_single_tab():
             main_plot = ui.plotly({}).classes('w-full').style('height:460px')
             plot_refs.update(dict(
                 main=main_plot, comp_dd=comp_dd, plot_dd=plot_dd,
+                plane_mode=plane_mode, lbl_plane_info=lbl_plane_info,
                 cut_type=cut_type, cut_val=cut_val, cut_comp=cut_comp,
                 cmin_inp=cmin_inp, cmax_inp=cmax_inp,
                 cb_peak=cb_peak, cb_hpbw=cb_hpbw,
@@ -521,7 +531,7 @@ def _build_single_tab():
                 last_comp=None,
             ))
 
-            for ctrl in [comp_dd, plot_dd, cut_type, cut_val, cut_comp, cmin_inp, cmax_inp]:
+            for ctrl in [comp_dd, plot_dd, plane_mode, cut_type, cut_val, cut_comp, cmin_inp, cmax_inp]:
                 ctrl.on('update:model-value', lambda _: _refresh_plot())
             cb_peak.on('update:model-value', lambda _: _refresh_plot())
             cb_hpbw.on('update:model-value', lambda _: _refresh_plot())
@@ -658,14 +668,11 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_in_rows'] = all_in
-        tbl_in.rows = all_in[:_TBL_DISP]
+        tbl_in.rows = all_in
         tbl_in.update()
         _lbl_in = plot_refs.get('lbl_in_count')
         if _lbl_in is not None:
-            if n > _TBL_DISP:
-                _lbl_in.set_text(f'Showing {_TBL_DISP:,} of {n:,} rows — export contains all rows')
-            else:
-                _lbl_in.set_text(f'{n:,} rows')
+            _lbl_in.set_text(f'{n:,} rows')
 
         # ── Output data table ───────────────────────────────────────────────
         all_data = [
@@ -680,14 +687,11 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_data_rows'] = all_data
-        tbl_data.rows = all_data[:_TBL_DISP]
+        tbl_data.rows = all_data
         tbl_data.update()
         _lbl_data = plot_refs.get('lbl_data_count')
         if _lbl_data is not None:
-            if n > _TBL_DISP:
-                _lbl_data.set_text(f'Showing {_TBL_DISP:,} of {n:,} rows — export contains all rows')
-            else:
-                _lbl_data.set_text(f'{n:,} rows')
+            _lbl_data.set_text(f'{n:,} rows')
 
         # ── Output metrics table ──────────────────────────────────────────
         tbl_out.rows = [{'metric': r[0], 'value': r[1]} for r in R.table_rows]
@@ -707,6 +711,18 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         _notify_err(f'Processing error: {ex}')
 
 
+def _eff_cut_params(R, plane_mode_val, cut_type_val, cut_val_val):
+    """Return effective (cut_type, cut_value) for E-Plane / H-Plane / Custom mode."""
+    if R is None or plane_mode_val == 'Custom':
+        return cut_type_val, float(cut_val_val)
+    peak_theta, peak_phi = R.max_gain_dir
+    if plane_mode_val == 'E-Plane':
+        return 'Theta Cut', float(peak_phi)
+    elif plane_mode_val == 'H-Plane':
+        return 'Theta Cut', float((peak_phi + 90) % 360)
+    return cut_type_val, float(cut_val_val)
+
+
 def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
                          cmin_inp, cmax_inp, cb_peak, cb_hpbw, cut_comp=None):
     R = _state['R_single']
@@ -715,6 +731,18 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
         cc = cut_comp.value if cut_comp is not None else ['Total Gain', 'RHCP Gain', 'LHCP Gain']
         if isinstance(cc, list) and len(cc) == 0:
             cc = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
+
+        # ── Resolve E/H-plane override ────────────────────────────────────
+        plane_mode_ctrl = plot_refs.get('plane_mode')
+        plane_mode_val  = plane_mode_ctrl.value if plane_mode_ctrl else 'Custom'
+        eff_cut_type, eff_cut_val = _eff_cut_params(
+            R, plane_mode_val, cut_type.value, float(cut_val.value or 0))
+        lbl_pi = plot_refs.get('lbl_plane_info')
+        if lbl_pi is not None:
+            if plane_mode_val != 'Custom':
+                lbl_pi.set_text(f'θ-cut @ φ={eff_cut_val:.1f}°')
+            else:
+                lbl_pi.set_text('')
 
         # AR colormap handling:
         #   - Switching TO AR: save current limits, auto-set symmetric AR limits.
@@ -751,7 +779,7 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
 
         fig = _render_plot(
             R, plot_type=plot_dd.value, component=comp_dd.value,
-            cut_type=cut_type.value, cut_value=float(cut_val.value),
+            cut_type=eff_cut_type, cut_value=eff_cut_val,
             cmin=cmin, cmax=cmax,
             show_peak=cb_peak.value, show_hpbw=cb_hpbw.value,
             cut_component=cc,
@@ -1720,6 +1748,7 @@ ui.run(
     host='0.0.0.0',
     port=5000,
     title='Antenna Pattern Analyzer',
+    favicon='📡',
     dark=True,
     reload=False,
 )
