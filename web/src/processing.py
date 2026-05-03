@@ -425,6 +425,63 @@ def apply_rotation(P, R_mat: np.ndarray):
     return np.rad2deg(th2), np.rad2deg(ph2)
 
 
+def rotate_processed_pattern(R_proc: 'ProcessedPattern', R_mat: np.ndarray) -> 'ProcessedPattern':
+    """Rotate a ProcessedPattern's grids by R_mat without re-meshing.
+    For each output grid direction we look up the unrotated source via R^T.
+    Much faster than the scatter→Delaunay path; keeps the regular grid intact."""
+    import dataclasses
+    from scipy.interpolate import RegularGridInterpolator
+
+    th_vec = R_proc.theta_vec
+    ph_vec = R_proc.phi_vec
+    TH, PH = np.meshgrid(np.deg2rad(th_vec), np.deg2rad(ph_vec), indexing='ij')
+
+    x = np.sin(TH) * np.cos(PH)
+    y = np.sin(TH) * np.sin(PH)
+    z = np.cos(TH)
+    xyz_src = R_mat.T @ np.stack([x.ravel(), y.ravel(), z.ravel()])
+    th_src = np.rad2deg(np.arccos(np.clip(xyz_src[2], -1.0, 1.0)))
+    ph_src = np.rad2deg(np.arctan2(xyz_src[1], xyz_src[0]) % (2 * np.pi))
+    pts = np.column_stack([th_src, ph_src])
+
+    def _rot(G):
+        itp = RegularGridInterpolator(
+            (th_vec, ph_vec), G, method='linear',
+            bounds_error=False, fill_value=float(np.nanmin(G)))
+        return itp(pts).reshape(len(th_vec), len(ph_vec))
+
+    G_grid_r    = _rot(R_proc.G_grid)
+    RHCP_grid_r = _rot(R_proc.RHCP_grid)
+    LHCP_grid_r = _rot(R_proc.LHCP_grid)
+    AR_grid_r   = _rot(R_proc.AR_grid)
+    PLF_grid_r  = _rot(R_proc.PLF_grid)
+
+    i_pk   = np.unravel_index(np.argmax(G_grid_r), G_grid_r.shape)
+    max_g  = float(G_grid_r[i_pk])
+    max_d  = (float(th_vec[i_pk[0]]), float(ph_vec[i_pk[1]]))
+
+    TH_d, PH_d = np.meshgrid(th_vec, ph_vec, indexing='ij')
+    theta_f = TH_d.ravel(); phi_f = PH_d.ravel()
+    G_f     = G_grid_r.ravel()
+    RHCP_f  = RHCP_grid_r.ravel()
+    LHCP_f  = LHCP_grid_r.ravel()
+    AR_f    = AR_grid_r.ravel()
+    PLF_f   = PLF_grid_r.ravel()
+    Pt_eff  = float(R_proc.EIRP_dBW[0]) - float(R_proc.G_total_dB[0])
+    EIRP_f  = Pt_eff + G_f
+
+    return dataclasses.replace(
+        R_proc,
+        theta=theta_f, phi=phi_f,
+        G_total_dB=G_f, G_RHCP_dB=RHCP_f, G_LHCP_dB=LHCP_f,
+        AR_dB=AR_f, PLF_dB=PLF_f, EIRP_dBW=EIRP_f,
+        max_gain_dB=max_g, max_gain_dir=max_d,
+        G_grid=G_grid_r, RHCP_grid=RHCP_grid_r, LHCP_grid=LHCP_grid_r,
+        AR_grid=AR_grid_r, PLF_grid=PLF_grid_r,
+        is_regular=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Coverage computation
 # ---------------------------------------------------------------------------

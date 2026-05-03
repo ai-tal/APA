@@ -10,6 +10,7 @@ from nicegui import ui, app
 from src.parsers import load_pattern
 from src.processing import (process_pattern, combine_patterns, compute_coverage,
                              rotation_matrix_from_vectors, apply_rotation,
+                             rotate_processed_pattern,
                              get_component_grid, get_cut)
 from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
                            plot_3d_pattern, plot_3d_sphere,
@@ -18,7 +19,7 @@ from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
 
 # ── Module-level state ───────────────────────────────────────────────────────
 _state = dict(
-    P_single=None, R_single=None, rot_matrix=np.eye(3),
+    P_single=None, R_single=None, R_single_base=None, rot_matrix=np.eye(3),
     batch_entries=[],
     cov_patterns=[],   # {'name', 'R', 'enabled'}
     cov_runs=[],
@@ -85,7 +86,7 @@ def _card(title=''):
 
 
 def _render_plot(R, plot_type, component, cut_type, cut_value, cmin, cmax,
-                 show_peak=True, show_hpbw=False):
+                 show_peak=True, show_hpbw=False, cut_component='All'):
     if plot_type == 'Contour':
         return plot_contour(R, component, cmin, cmax, show_peak)
     elif plot_type == 'Circular':
@@ -95,9 +96,9 @@ def _render_plot(R, plot_type, component, cut_type, cut_value, cmin, cmax,
     elif plot_type == '3D Spherical':
         return plot_3d_sphere(R, component, cmin, cmax)
     elif plot_type == 'Polar Cut':
-        return plot_polar_cut(R, cut_type, cut_value, component, cmin, cmax, show_hpbw)
+        return plot_polar_cut(R, cut_type, cut_value, cut_component, cmin, cmax, show_hpbw)
     elif plot_type == 'Rect Cut':
-        return plot_rect_cut(R, cut_type, cut_value, cmin, cmax, show_hpbw)
+        return plot_rect_cut(R, cut_type, cut_value, cut_component, cmin, cmax, show_hpbw)
     elif plot_type == 'Filled Polar':
         return plot_filled_polar(R, component, cut_type, cut_value, cmin, cmax)
     else:
@@ -157,22 +158,40 @@ def main_page():
 /* NiceGUI bakes colours into style="..." attributes which CSS cannot         */
 /* override without !important on the exact attribute value. JS is reliable. */
 window._apaLight = false;
+/* Dark → Light colour pairs (also used to update Plotly bgcolor strings) */
 const _D2L = [
-  ['#161b22','#ffffff'], ['#0d1117','#f5f7fa'], ['#1a1a2e','#f0f2f5'],
-  ['#30363d','#d0d7de'], ['#8b949e','#57606a'], ['#e0e0e0','#24292f'],
-  ['#58a6ff','#0969da'], ['#4fc3f7','#0288d1'],
+  ['#161b22','#ffffff'], ['#16213e','#e8ecf0'], ['#0d1117','#f5f7fa'],
+  ['#1a1a2e','#f0f2f5'], ['#30363d','#d0d7de'], ['#8b949e','#57606a'],
+  ['#e0e0e0','#24292f'], ['#58a6ff','#0969da'], ['#4fc3f7','#0288d1'],
+  ['#334466','#c0c8d8'],
 ];
 const _L2D = _D2L.map(([d,l]) => [l,d]);
 
 function _apaSwap(el, pairs) {
   const s = el.getAttribute('style'); if (!s) return;
-  let ns = s;
-  pairs.forEach(([a,b]) => { ns = ns.split(a).join(b); });
-  if (ns !== s) el.setAttribute('style', ns);
+  let ns = s.toLowerCase();  // normalise for matching
+  let orig = s;
+  pairs.forEach(([a,b]) => { ns = ns.split(a.toLowerCase()).join(b); });
+  // Rebuild: replace in original case-insensitively
+  let result = orig;
+  pairs.forEach(([a,b]) => {
+    const re = new RegExp(a.replace('#','\\#'), 'gi');
+    result = result.replace(re, b);
+  });
+  if (result !== orig) el.setAttribute('style', result);
 }
 
 function _apaPatchAll(pairs) {
   document.querySelectorAll('[style]').forEach(el => _apaSwap(el, pairs));
+}
+
+function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
+  if (typeof Plotly === 'undefined') return;
+  document.querySelectorAll('.js-plotly-plot').forEach(div => {
+    try { Plotly.relayout(div, {
+      paper_bgcolor: bgPaper, plot_bgcolor: bgPlot, 'font.color': fontColor
+    }); } catch(e) {}
+  });
 }
 
 function _apaToLight() {
@@ -180,6 +199,7 @@ function _apaToLight() {
   _apaPatchAll(_D2L);
   document.body.style.background = '#f5f7fa';
   document.body.style.color      = '#24292f';
+  _apaRelayoutPlotly('#e8ecf0', '#f0f2f5', '#24292f');
 }
 
 function _apaToDark() {
@@ -187,6 +207,7 @@ function _apaToDark() {
   _apaPatchAll(_L2D);
   document.body.style.background = '#0d1117';
   document.body.style.color      = '#e0e0e0';
+  _apaRelayoutPlotly('#16213e', '#1a1a2e', '#e0e0e0');
 }
 
 /* MutationObserver: auto-patch newly added nodes when in light mode */
@@ -345,27 +366,44 @@ def _build_single_tab():
                     dst_ph = ui.number('Dst φ (°)', value=0.0).props('dense dark outlined')
 
                 def _do_rotate():
-                    if _state['P_single'] is None:
-                        _notify_err('Load a file first.'); return
+                    if _state['R_single_base'] is None:
+                        _notify_err('Process a pattern first.'); return
                     try:
                         R_mat = rotation_matrix_from_vectors(
                             float(src_th.value), float(src_ph.value),
                             float(dst_th.value), float(dst_ph.value))
                         _state['rot_matrix'] = _state['rot_matrix'] @ R_mat
-                        P = _state['P_single']
-                        new_th, new_ph = apply_rotation(P, R_mat)
-                        P.theta = new_th
-                        P.phi   = new_ph
-                        P._build_header()
-                        _notify('Rotation applied — re-processing…')
-                        _reprocess()
+                        # Rotate the GRID (fast, no re-meshing) on top of current result
+                        _state['R_single'] = rotate_processed_pattern(
+                            _state['R_single'], R_mat)
+                        R = _state['R_single']
+                        # Update metrics labels
+                        dir_str = f'θ={R.max_gain_dir[0]:.1f}° φ={R.max_gain_dir[1]:.1f}°'
+                        lbl_peak.set_text(f'Peak: {R.max_gain_dB:.2f} dBi  @  {dir_str}')
+                        _update_single_plot(
+                            plot_refs,
+                            plot_refs['comp_dd'], plot_refs['plot_dd'],
+                            plot_refs['cut_type'], plot_refs['cut_val'],
+                            plot_refs['cmin_inp'], plot_refs['cmax_inp'],
+                            plot_refs['cb_peak'],  plot_refs['cb_hpbw'],
+                            plot_refs['cut_comp'])
+                        _notify('Rotation applied.')
                     except Exception as ex:
                         traceback.print_exc()
                         _notify_err(f'Rotation error: {ex}')
 
                 def _reset_rot():
                     _state['rot_matrix'] = np.eye(3)
-                    _notify('Rotation reset. Re-upload to restore original directions.')
+                    if _state['R_single_base'] is not None:
+                        _state['R_single'] = _state['R_single_base']
+                        _update_single_plot(
+                            plot_refs,
+                            plot_refs['comp_dd'], plot_refs['plot_dd'],
+                            plot_refs['cut_type'], plot_refs['cut_val'],
+                            plot_refs['cmin_inp'], plot_refs['cmax_inp'],
+                            plot_refs['cb_peak'],  plot_refs['cb_hpbw'],
+                            plot_refs['cut_comp'])
+                    _notify('Rotation reset to original.')
 
                 with ui.row().classes('w-full gap-1'):
                     ui.button('Rotate', on_click=_do_rotate, icon='360').props(
@@ -403,6 +441,9 @@ def _build_single_tab():
                     'dense dark outlined').style('min-width:106px')
                 cut_val  = ui.number('Cut Value (°)', value=0.0, format='%.1f').props(
                     'dense dark outlined').style('min-width:106px')
+                _CUT_COMPS = ['All', 'Total Gain', 'RHCP Gain', 'LHCP Gain']
+                cut_comp = ui.select(_CUT_COMPS, value='All', label='Cut Component').props(
+                    'dense dark outlined').style('min-width:130px')
                 cmin_inp = ui.number('Cmin (dB)', value=-50.0, format='%.0f').props(
                     'dense dark outlined').style('min-width:88px')
                 cmax_inp = ui.number('Cmax (dB)', value=0.0,   format='%.0f').props(
@@ -414,14 +455,16 @@ def _build_single_tab():
 
                 def _update_controls_visibility():
                     is_cut = plot_dd.value in CUT_PLOT_TYPES
+                    is_1d_cut = plot_dd.value in ('Polar Cut', 'Rect Cut')
                     cut_type.set_visibility(is_cut)
                     cut_val.set_visibility(is_cut)
-                    # HPBW only meaningful for Polar Cut and Rect Cut
-                    cb_hpbw.set_visibility(plot_dd.value in ('Polar Cut', 'Rect Cut'))
+                    cut_comp.set_visibility(is_1d_cut)
+                    cb_hpbw.set_visibility(is_1d_cut)
 
-                # Initial visibility (Contour = no cut controls, no HPBW)
+                # Initial visibility (Contour = no cut controls)
                 cut_type.set_visibility(False)
                 cut_val.set_visibility(False)
+                cut_comp.set_visibility(False)
                 cb_hpbw.set_visibility(False)
 
                 def _refresh_plot():
@@ -429,7 +472,7 @@ def _build_single_tab():
                     if _state['R_single'] is None: return
                     _update_single_plot(
                         plot_refs, comp_dd, plot_dd, cut_type, cut_val,
-                        cmin_inp, cmax_inp, cb_peak, cb_hpbw)
+                        cmin_inp, cmax_inp, cb_peak, cb_hpbw, cut_comp)
 
                 ui.button('Refresh', on_click=_refresh_plot, icon='refresh').props(
                     'flat color=blue size=sm')
@@ -437,23 +480,22 @@ def _build_single_tab():
             main_plot = ui.plotly({}).classes('w-full').style('height:460px')
             plot_refs.update(dict(
                 main=main_plot, comp_dd=comp_dd, plot_dd=plot_dd,
-                cut_type=cut_type, cut_val=cut_val,
+                cut_type=cut_type, cut_val=cut_val, cut_comp=cut_comp,
                 cmin_inp=cmin_inp, cmax_inp=cmax_inp,
                 cb_peak=cb_peak, cb_hpbw=cb_hpbw,
                 fmt_dd=fmt_dd,
                 pt=pt_inp, loss=loss_inp, rw=rw_inp, dist=dist_inp,
             ))
 
-            for ctrl in [comp_dd, plot_dd, cut_type, cut_val, cmin_inp, cmax_inp]:
+            for ctrl in [comp_dd, plot_dd, cut_type, cut_val, cut_comp, cmin_inp, cmax_inp]:
                 ctrl.on('update:model-value', lambda _: _refresh_plot())
             cb_peak.on('update:model-value', lambda _: _refresh_plot())
             cb_hpbw.on('update:model-value', lambda _: _refresh_plot())
 
-            # ── Data tables (3 tabs) ────────────────────────────────────────
+            # ── Data tables (2 tabs — metrics are in the left panel) ──────────
             with ui.tabs().props('dense indicator-color=blue').classes('w-full') as dtabs:
                 dt_in   = ui.tab('Input Data')
                 dt_data = ui.tab('Output Data')
-                dt_out  = ui.tab('Output Metrics')
 
             with ui.tab_panels(dtabs, value=dt_in).classes('w-full').style(
                     'background:#0d1117'):
@@ -488,15 +530,8 @@ def _build_single_tab():
                     ).props('dense dark flat virtual-scroll').style(
                         'max-height:220px').classes('w-full')
 
-                with ui.tab_panel(dt_out):
-                    tbl_out = ui.table(
-                        columns=[
-                            {'name': 'metric', 'label': 'Metric', 'field': 'metric', 'align': 'left'},
-                            {'name': 'value',  'label': 'Value',  'field': 'value',  'align': 'left'},
-                        ],
-                        rows=[], row_key='metric',
-                    ).props('dense dark flat virtual-scroll').style(
-                        'max-height:220px').classes('w-full')
+            # Dummy table for backward compat (tbl_out.rows still updated in callback)
+            tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
 
 
 # ── Single-tab callbacks ──────────────────────────────────────────────────────
@@ -535,6 +570,11 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         params = dict(Pt_dBW=float(pt_inp.value), Loss_dB=float(loss_inp.value),
                       Rw_dB=float(rw_inp.value), dist_m=float(dist_inp.value))
         R = process_pattern(P, params)
+        # Save unrotated base; apply any accumulated rotation on top
+        _state['R_single_base'] = R
+        rot = _state['rot_matrix']
+        if not np.allclose(rot, np.eye(3)):
+            R = rotate_processed_pattern(R, rot)
         _state['R_single'] = R
 
         cmin, cmax = auto_clim(R.max_gain_dB)
@@ -591,7 +631,8 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             plot_refs['comp_dd'], plot_refs['plot_dd'],
             plot_refs['cut_type'], plot_refs['cut_val'],
             plot_refs['cmin_inp'], plot_refs['cmax_inp'],
-            plot_refs['cb_peak'],  plot_refs['cb_hpbw'])
+            plot_refs['cb_peak'],  plot_refs['cb_hpbw'],
+            plot_refs['cut_comp'])
 
         _notify(f'Processed  {P.name}  [{P.fmt}]')
     except Exception as ex:
@@ -600,15 +641,17 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
 
 
 def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
-                         cmin_inp, cmax_inp, cb_peak, cb_hpbw):
+                         cmin_inp, cmax_inp, cb_peak, cb_hpbw, cut_comp=None):
     R = _state['R_single']
     if R is None: return
     try:
+        cc = cut_comp.value if cut_comp is not None else 'All'
         fig = _render_plot(
             R, plot_type=plot_dd.value, component=comp_dd.value,
             cut_type=cut_type.value, cut_value=float(cut_val.value),
             cmin=float(cmin_inp.value), cmax=float(cmax_inp.value),
             show_peak=cb_peak.value, show_hpbw=cb_hpbw.value,
+            cut_component=cc,
         )
         plot_refs['main'].update_figure(fig)
     except Exception as ex:
@@ -886,9 +929,12 @@ def _build_coverage_tab():
         lbl_cov_n.set_text(f'{n} pattern(s) loaded')
         with cov_list_col:
             with ui.row().classes('w-full items-center gap-1').style('flex-wrap:nowrap'):
+                def _on_cov_cb_change(e, p=pat_entry):
+                    p.update({'enabled': e.value})
+                    _refresh_cov_plot()   # live-filter results on check/uncheck
                 cb = ui.checkbox(
                     value=pat_entry.get('enabled', True),
-                    on_change=lambda e, p=pat_entry: p.update({'enabled': e.value})
+                    on_change=_on_cov_cb_change,
                 ).props('dark color=blue size=xs')
                 ui.label(pat_entry['name']).style(
                     'font-size:0.8rem; color:#e0e0e0; flex:1; '
@@ -897,8 +943,16 @@ def _build_coverage_tab():
                     'font-size:0.75rem; color:#8b949e; white-space:nowrap')
 
     def _refresh_cov_plot():
-        runs = _state['cov_runs']
-        if not runs: return
+        all_runs = _state['cov_runs']
+        if not all_runs: return
+        # Filter to only patterns currently enabled in the list
+        enabled = {p['name'] for p in _state['cov_patterns'] if p.get('enabled', True)}
+        runs = [r for r in all_runs if r['name'] in enabled]
+        if not runs:
+            cov_plot.update_figure({})
+            cov_results_tbl.columns = []; cov_results_tbl.rows = []
+            cov_results_tbl.update()
+            return
 
         cov_plot.update_figure(
             plot_coverage_cdf(
@@ -949,10 +1003,10 @@ async def _on_cov_upload(e, lst_col, lbl, refresh_plot_fn):
 
         with lst_col:
             with ui.row().classes('w-full items-center gap-1').style('flex-wrap:nowrap'):
-                cb = ui.checkbox(
-                    value=True,
-                    on_change=lambda e, p=pat_entry: p.update({'enabled': e.value})
-                ).props('dark color=blue size=xs')
+                def _cov_cb(ev, p=pat_entry):
+                    p.update({'enabled': ev.value})
+                    refresh_plot_fn()
+                cb = ui.checkbox(value=True, on_change=_cov_cb).props('dark color=blue size=xs')
                 ui.label(P.name).style(
                     'font-size:0.8rem; color:#e0e0e0; flex:1; '
                     'overflow:hidden; text-overflow:ellipsis')
