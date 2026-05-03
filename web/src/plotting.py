@@ -188,8 +188,9 @@ def plot_3d_spherical(R: ProcessedPattern, component: str = 'Total Gain',
         hovertemplate='θ=%{customdata[0]:.1f}°<br>φ=%{customdata[1]:.1f}°<br>'+label+'=%{surfacecolor:.2f}<extra></extra>',
         customdata=np.stack([TH_deg, PH_deg], axis=-1),
     ))
+    layout_3d = {k: v for k, v in _LAYOUT_BASE.items() if k != 'margin'}
     fig.update_layout(
-        **_LAYOUT_BASE,
+        **layout_3d,
         title=dict(text=f'3D Spherical — {label}', font=dict(color=_FONT_COLOR)),
         scene=dict(
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),

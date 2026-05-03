@@ -293,10 +293,11 @@ def _build_single_tab():
 
 # ── Single-tab callbacks ────────────────────────────────────────────────────
 
-def _on_upload_single(e, lbl_status, plot_refs, tbl_in, tbl_out,
-                       lbl_peak, lbl_pol, lbl_hpbw):
+async def _on_upload_single(e, lbl_status, plot_refs, tbl_in, tbl_out,
+                            lbl_peak, lbl_pol, lbl_hpbw):
     try:
-        P = load_pattern(e.content.read(), filename=e.name,
+        data = await e.file.read()
+        P = load_pattern(data, filename=e.file.name,
                          format_hint=plot_refs['fmt_dd'].value)
         _state['P_single'] = P
         _state['rot_matrix'] = np.eye(3)
@@ -539,16 +540,17 @@ def _build_batch_tab():
     refs['refresh_summary'] = _refresh_batch_summary
 
 
-def _on_batch_upload(e, refs):
+async def _on_batch_upload(e, refs):
     try:
-        P = load_pattern(e.content.read(), filename=e.name)
+        data = await e.file.read()
+        P = load_pattern(data, filename=e.file.name)
         _state['batch_entries'].append(
             {'name': P.name, 'P': P, 'R': None, 'ok': False, 'err': ''})
         n = len(_state['batch_entries'])
         refs['lbl_status'].set_text(f'{n} file(s) queued')
         refs['refresh_list'](refs['file_list'])
     except Exception as ex:
-        _notify_err(f'Load error ({e.name}): {ex}')
+        _notify_err(f'Load error ({e.file.name}): {ex}')
 
 
 def _select_entry(ent, refs):
@@ -679,9 +681,10 @@ def _build_coverage_tab():
                 [r['name'] for r in runs]))
 
 
-def _on_cov_upload(e, lst, lbl):
+async def _on_cov_upload(e, lst, lbl):
     try:
-        P = load_pattern(e.content.read(), filename=e.name)
+        data = await e.file.read()
+        P = load_pattern(data, filename=e.file.name)
         R = process_pattern(P)
         _state['cov_patterns'].append({'name': P.name, 'R': R})
         n = len(_state['cov_patterns'])
@@ -695,7 +698,7 @@ def _on_cov_upload(e, lst, lbl):
                     ).props('caption')
         _notify(f'Loaded {P.name}')
     except Exception as ex:
-        _notify_err(f'Coverage load error ({e.name}): {ex}')
+        _notify_err(f'Coverage load error ({e.file.name}): {ex}')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -850,9 +853,10 @@ def _build_combine_tab():
                 cmb_plot_el = ui.plotly({}).classes('w-full').style('height:500px')
 
 
-def _on_cmb_upload(e, lst, lbl):
+async def _on_cmb_upload(e, lst, lbl):
     try:
-        P = load_pattern(e.content.read(), filename=e.name)
+        data = await e.file.read()
+        P = load_pattern(data, filename=e.file.name)
         R = process_pattern(P)
         _state['cmb_patterns'].append({'name': P.name, 'R': R})
         n = len(_state['cmb_patterns'])
@@ -866,7 +870,7 @@ def _on_cmb_upload(e, lst, lbl):
                     ).props('caption')
         _notify(f'Loaded {P.name}')
     except Exception as ex:
-        _notify_err(f'Load error ({e.name}): {ex}')
+        _notify_err(f'Load error ({e.file.name}): {ex}')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
