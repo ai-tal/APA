@@ -109,14 +109,14 @@ def _render_plot(R, plot_type, component, cut_type, cut_value, cmin, cmax,
 # MAIN PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 _MOON_SVG = (
-    '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" '
-    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" '
+    'stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
     '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
     '</svg>'
 )
 _SUN_SVG = (
-    '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" '
-    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" '
+    'stroke="#ffd600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
     '<circle cx="12" cy="12" r="5"/>'
     '<line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>'
     '<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>'
@@ -160,8 +160,8 @@ function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
 }
 </script>''')
 
-    _dark = ui.dark_mode(value=True)
-    _theme = {'dark': True}
+    _dark = ui.dark_mode(value=False)
+    _theme = {'dark': False}
 
     with ui.header(elevated=True).classes('items-center').style('padding:4px 12px; gap:0'):
         ui.label('📡 APA').style(
@@ -178,17 +178,15 @@ function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
             _theme['dark'] = not _theme['dark']
             if _theme['dark']:
                 _dark.enable()
-                _theme_icon.set_content(_MOON_SVG)
-                _theme_btn.style('color:white')
+                _theme_icon.set_content(_SUN_SVG)
                 ui.run_javascript('_apaRelayoutPlotly("#16213e","#1a1a2e","#e0e0e0")')
             else:
                 _dark.disable()
-                _theme_icon.set_content(_SUN_SVG)
-                _theme_btn.style('color:#ffd600')
+                _theme_icon.set_content(_MOON_SVG)
                 ui.run_javascript('_apaRelayoutPlotly("#f5f7fa","#f0f2f5","#24292f")')
 
         with ui.button(on_click=_toggle_theme).props('flat round dense').style(
-                'color:white; width:34px; height:34px; padding:0; min-width:0; '
+                'width:34px; height:34px; padding:0; min-width:0; '
                 'flex-shrink:0; margin-left:8px') as _theme_btn:
             _theme_icon = ui.html(_MOON_SVG)
 
@@ -648,19 +646,26 @@ def _build_batch_tab():
                 _notify(f'Batch complete: {ok}/{len(entries)} OK')
 
             def _export_batch_csv():
+                import zipfile, io
                 entries = [e for e in _state['batch_entries'] if e.get('ok')]
                 if not entries: _notify_err('Run batch processing first.'); return
-                rows = ['name,peak_gain_dBi,peak_theta,peak_phi,dominant_pol,'
-                        'hpbw_e_deg,hpbw_h_deg,fbr_dB,directivity_dBi']
-                for e in entries:
-                    R = e['R']
-                    rows.append(f"{e['name']},{R.max_gain_dB:.4f},"
-                                f"{R.max_gain_dir[0]:.2f},{R.max_gain_dir[1]:.2f},"
-                                f"{R.dominant_pol},"
-                                f"{R.hpbw_e or ''},{R.hpbw_h or ''},"
-                                f"{R.fbr_dB or ''},{R.directivity_dBi or ''}")
-                ui.download('\n'.join(rows).encode(), 'batch_summary.csv')
-                _notify('Downloading batch_summary.csv')
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for e in entries:
+                        R = e['R']
+                        rows = ['theta_deg,phi_deg,G_total_dBi,G_RHCP_dBic,'
+                                'G_LHCP_dBic,AR_dB,PLF_dB,EIRP_dBW']
+                        for i in range(len(R.theta)):
+                            rows.append(
+                                f'{R.theta[i]:.4f},{R.phi[i]:.4f},'
+                                f'{R.G_total_dB[i]:.4f},{R.G_RHCP_dB[i]:.4f},'
+                                f'{R.G_LHCP_dB[i]:.4f},{R.AR_dB[i]:.4f},'
+                                f'{R.PLF_dB[i]:.4f},{R.EIRP_dBW[i]:.4f}')
+                        safe_name = e['name'].rsplit('.', 1)[0] + '_processed.csv'
+                        zf.writestr(safe_name, '\n'.join(rows))
+                buf.seek(0)
+                ui.download(buf.read(), 'batch_patterns.zip')
+                _notify(f'Downloading {len(entries)} pattern CSV(s) as zip')
 
             def _clear_batch():
                 _state['batch_entries'].clear()

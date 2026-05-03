@@ -129,12 +129,25 @@ def _xyz_axes(r_scale: float, colorX='#ff4444', colorY='#44ff44', colorZ='#4fc3f
 # ─────────────────────────────────────────────────────────────────────────────
 # Contour (Heatmap) — phi (x) vs theta (y)
 # ─────────────────────────────────────────────────────────────────────────────
+def _ar_clim(grid):
+    """Auto Cmin/Cmax for Axial Ratio: always starts at 0, ceiling at next 5."""
+    raw_max = float(np.nanmax(grid))
+    cmax = float(np.ceil(max(raw_max, 1.0) / 5) * 5)
+    return 0.0, cmax
+
+
 def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
                  cmin: float = None, cmax: float = None,
                  show_peak: bool = True) -> go.Figure:
     grid, label = get_component_grid(R, component)
-    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None: cmin = cmax - 50
+    if component == 'Axial Ratio':
+        if cmin is None or cmax is None:
+            _c0, _c1 = _ar_clim(grid)
+            if cmin is None: cmin = _c0
+            if cmax is None: cmax = _c1
+    else:
+        if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+        if cmin is None: cmin = cmax - 50
 
     pv, gw = _wrap_phi(R, grid)
 
@@ -323,8 +336,15 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
                       cmin: float = None, cmax: float = None) -> go.Figure:
     """Balanis-style filled polar: interior colored by gain, like a 2-D pattern filled
     with a Jet colormap (blue=low, red=high), outline drawn on top."""
-    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None: cmin = cmax - 50
+    if component == 'Axial Ratio':
+        grid_ar, _ = get_component_grid(R, component)
+        if cmin is None or cmax is None:
+            _c0, _c1 = _ar_clim(grid_ar)
+            if cmin is None: cmin = _c0
+            if cmax is None: cmax = _c1
+    else:
+        if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+        if cmin is None: cmin = cmax - 50
 
     angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, component)
     comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
@@ -448,8 +468,14 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
 def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
                     cmin: float = None, cmax: float = None) -> go.Figure:
     grid, label = get_component_grid(R, component)
-    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None: cmin = cmax - 50
+    if component == 'Axial Ratio':
+        if cmin is None or cmax is None:
+            _c0, _c1 = _ar_clim(grid)
+            if cmin is None: cmin = _c0
+            if cmax is None: cmax = _c1
+    else:
+        if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+        if cmin is None: cmin = cmax - 50
 
     pv, gw = _wrap_phi(R, grid)
     TH_deg, PH_deg = np.meshgrid(R.theta_vec, pv, indexing='ij')
@@ -501,8 +527,14 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
 def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
                    cmin: float = None, cmax: float = None) -> go.Figure:
     grid, label = get_component_grid(R, component)
-    if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
-    if cmin is None: cmin = cmax - 50
+    if component == 'Axial Ratio':
+        if cmin is None or cmax is None:
+            _c0, _c1 = _ar_clim(grid)
+            if cmin is None: cmin = _c0
+            if cmax is None: cmax = _c1
+    else:
+        if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
+        if cmin is None: cmin = cmax - 50
 
     pv, gw = _wrap_phi(R, grid)
     TH_deg, PH_deg = np.meshgrid(R.theta_vec, pv, indexing='ij')

@@ -445,8 +445,11 @@ def rotate_processed_pattern(R_proc: 'ProcessedPattern', R_mat: np.ndarray) -> '
     pts = np.column_stack([th_src, ph_src])
 
     def _rot(G):
+        # Extend phi by one column at 360° (=copy of 0°) to handle wrap-around
+        ph_ext = np.append(ph_vec, ph_vec[0] + 360.0)
+        G_ext  = np.concatenate([G, G[:, :1]], axis=1)
         itp = RegularGridInterpolator(
-            (th_vec, ph_vec), G, method='linear',
+            (th_vec, ph_ext), G_ext, method='linear',
             bounds_error=False, fill_value=float(np.nanmin(G)))
         return itp(pts).reshape(len(th_vec), len(ph_vec))
 
