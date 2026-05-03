@@ -21,6 +21,9 @@ from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
                            plot_coverage_cdf, plot_batch_summary, auto_clim,
                            set_plot_theme)
 
+# ── Table display cap (rows sent to browser at once) ─────────────────────────
+_TBL_CAP = 5000  # virtual-scroll handles render; this prevents WebSocket flood
+
 # ── Orientation presets (matches MATLAB DropDown_InitOri) ────────────────────
 _ORI_PRESETS = {
     '+Z (Overhead)': (0.0,   0.0),
@@ -518,50 +521,33 @@ def _build_single_tab():
                     tbl_in = ui.table(
                         columns=_IN_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
-                        'height:280px').classes('w-full')
+                        'height:240px').classes('w-full')
                     plot_refs['_all_in_rows'] = []
-                    plot_refs['_in_col_filters'] = {
-                        cn: '' for cn in ['theta','phi','gth','gph','pth','pph']}
-
-                    def _apply_in_col_filter():
-                        src = plot_refs.get('_all_in_rows', [])
-                        result = src
-                        for cn, fv in plot_refs['_in_col_filters'].items():
-                            if fv:
-                                result = [r for r in result
-                                          if fv in str(r.get(cn, '')).lower()]
-                        tbl_in.rows = result
+                    def _filter_in(val=''):
+                        v = str(val or '').strip().lower()
+                        src = plot_refs['_all_in_rows']
+                        if v:
+                            tbl_in.rows = [r for r in src
+                                           if any(v in str(x).lower()
+                                                  for x in r.values())]
+                        else:
+                            tbl_in.rows = src[:_TBL_CAP]
+                            if len(src) > _TBL_CAP:
+                                tbl_in.rows.append(dict(
+                                    row_num='…',
+                                    theta=f'showing {_TBL_CAP:,} of {len(src):,} '
+                                          f'rows — use filter or Export CSV',
+                                    phi='', gth='', gph='', pth='', pph=''))
                         tbl_in.update()
-
-                    _IN_HDR = {'theta': 'θ (°)', 'phi': 'φ (°)',
-                               'gth': '|Eθ| dB', 'gph': '|Eφ| dB',
-                               'pth': '∠Eθ (°)', 'pph': '∠Eφ (°)'}
-                    for _cn, _cl in _IN_HDR.items():
-                        tbl_in.add_slot(f'header-cell-{_cn}', f'''
-                            <q-th :props="props"
-                                  style="padding:2px 6px; vertical-align:top">
-                              <div style="font-weight:600;font-size:0.78rem;
-                                          white-space:nowrap;line-height:1.4"
-                                   class="cursor-pointer"
-                                   @click="props.col.sortable && props.sort(props.col)">
-                                {_cl}
-                                <q-icon v-if="props.col.sorted"
-                                        :name="props.col.descending
-                                               ? \'arrow_downward\' : \'arrow_upward\'"
-                                        style="font-size:0.75rem;color:#58a6ff"/>
-                              </div>
-                              <q-input dense borderless clearable
-                                       placeholder="▽"
-                                       input-style="font-size:0.7rem"
-                                       style="min-width:0;margin-top:1px"
-                                       @update:model-value=
-                                         "$emit(\'colfilter-{_cn}\', $event)" />
-                            </q-th>''')
-                        tbl_in.on(f'colfilter-{_cn}',
-                                  lambda e, c=_cn: (
-                                      plot_refs['_in_col_filters'].update(
-                                          {c: str(e.args or '').strip().lower()}),
-                                      _apply_in_col_filter()))
+                    with tbl_in.add_slot('top'):
+                        with ui.row().classes('w-full items-center gap-1').style(
+                                'padding:2px 6px'):
+                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
+                            ui.input(placeholder='Filter rows…').props(
+                                'dense borderless clearable'
+                            ).classes('flex-1').on(
+                                'update:model-value',
+                                lambda e: _filter_in(e.args))
 
                 with ui.tab_panel(dt_data):
                     _DATA_COLS = [
@@ -578,53 +564,34 @@ def _build_single_tab():
                     tbl_data = ui.table(
                         columns=_DATA_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
-                        'height:280px').classes('w-full')
+                        'height:240px').classes('w-full')
                     plot_refs['_all_data_rows'] = []
-                    plot_refs['_data_col_filters'] = {
-                        cn: '' for cn in
-                        ['theta','phi','gtot','grhcp','glhcp','ar','plf','eirp']}
-
-                    def _apply_data_col_filter():
-                        src = plot_refs.get('_all_data_rows', [])
-                        result = src
-                        for cn, fv in plot_refs['_data_col_filters'].items():
-                            if fv:
-                                result = [r for r in result
-                                          if fv in str(r.get(cn, '')).lower()]
-                        tbl_data.rows = result
+                    def _filter_data(val=''):
+                        v = str(val or '').strip().lower()
+                        src = plot_refs['_all_data_rows']
+                        if v:
+                            tbl_data.rows = [r for r in src
+                                             if any(v in str(x).lower()
+                                                    for x in r.values())]
+                        else:
+                            tbl_data.rows = src[:_TBL_CAP]
+                            if len(src) > _TBL_CAP:
+                                tbl_data.rows.append(dict(
+                                    row_num='…',
+                                    theta=f'showing {_TBL_CAP:,} of {len(src):,} '
+                                          f'rows — use filter or Export CSV',
+                                    phi='', gtot='', grhcp='', glhcp='',
+                                    ar='', plf='', eirp=''))
                         tbl_data.update()
-
-                    _DATA_HDR = {
-                        'theta': 'θ (°)', 'phi': 'φ (°)',
-                        'gtot': 'G_tot', 'grhcp': 'G_RHCP',
-                        'glhcp': 'G_LHCP', 'ar': 'AR (dB)',
-                        'plf': 'PLF (dB)', 'eirp': 'EIRP'}
-                    for _cn, _cl in _DATA_HDR.items():
-                        tbl_data.add_slot(f'header-cell-{_cn}', f'''
-                            <q-th :props="props"
-                                  style="padding:2px 6px; vertical-align:top">
-                              <div style="font-weight:600;font-size:0.78rem;
-                                          white-space:nowrap;line-height:1.4"
-                                   class="cursor-pointer"
-                                   @click="props.col.sortable && props.sort(props.col)">
-                                {_cl}
-                                <q-icon v-if="props.col.sorted"
-                                        :name="props.col.descending
-                                               ? \'arrow_downward\' : \'arrow_upward\'"
-                                        style="font-size:0.75rem;color:#58a6ff"/>
-                              </div>
-                              <q-input dense borderless clearable
-                                       placeholder="▽"
-                                       input-style="font-size:0.7rem"
-                                       style="min-width:0;margin-top:1px"
-                                       @update:model-value=
-                                         "$emit(\'datacol-{_cn}\', $event)" />
-                            </q-th>''')
-                        tbl_data.on(f'datacol-{_cn}',
-                                    lambda e, c=_cn: (
-                                        plot_refs['_data_col_filters'].update(
-                                            {c: str(e.args or '').strip().lower()}),
-                                        _apply_data_col_filter()))
+                    with tbl_data.add_slot('top'):
+                        with ui.row().classes('w-full items-center gap-1').style(
+                                'padding:2px 6px'):
+                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
+                            ui.input(placeholder='Filter rows…').props(
+                                'dense borderless clearable'
+                            ).classes('flex-1').on(
+                                'update:model-value',
+                                lambda e: _filter_data(e.args))
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
             tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
@@ -697,8 +664,9 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         lbl_hpbw.set_text(f'HPBW  E:{he}  H:{hh}{fb}')
 
         n = len(P.theta)
+        _TBL_CAP = 5000  # rows sent to browser; filter searches full dataset
 
-        # ── Input data table — all rows, no cap ────────────────────────────
+        # ── Input data table ────────────────────────────────────────────────
         Gth = 20 * np.log10(np.abs(P.Eth) + 1e-30)
         Gph = 20 * np.log10(np.abs(P.Eph) + 1e-30)
         pth = np.angle(P.Eth, deg=True)
@@ -711,12 +679,15 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_in_rows'] = all_in
-        plot_refs['_in_col_filters'] = {
-            cn: '' for cn in ['theta','phi','gth','gph','pth','pph']}
-        tbl_in.rows = all_in
+        tbl_in.rows = all_in[:_TBL_CAP]
+        if n > _TBL_CAP:
+            tbl_in.rows.append(dict(
+                row_num='…',
+                theta=f'showing {_TBL_CAP:,} of {n:,} rows — use filter or Export CSV for full data',
+                phi='', gth='', gph='', pth='', pph=''))
         tbl_in.update()
 
-        # ── Output data table — all rows, no cap ───────────────────────────
+        # ── Output data table ───────────────────────────────────────────────
         all_data = [
             dict(row_num=str(i + 1),
                  theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
@@ -729,10 +700,12 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_data_rows'] = all_data
-        plot_refs['_data_col_filters'] = {
-            cn: '' for cn in
-            ['theta','phi','gtot','grhcp','glhcp','ar','plf','eirp']}
-        tbl_data.rows = all_data
+        tbl_data.rows = all_data[:_TBL_CAP]
+        if n > _TBL_CAP:
+            tbl_data.rows.append(dict(
+                row_num='…',
+                theta=f'showing {_TBL_CAP:,} of {n:,} rows — use filter or Export CSV for full data',
+                phi='', gtot='', grhcp='', glhcp='', ar='', plf='', eirp=''))
         tbl_data.update()
 
         # ── Output metrics table ──────────────────────────────────────────
@@ -957,11 +930,12 @@ def _build_batch_tab():
                                 zf.writestr('batch_conical_coverage.csv',
                                             '\n'.join(con_rows))
 
-                    buf.seek(0)
-                    ui.download(buf.read(), 'batch_patterns.zip')
+                    data = buf.getvalue()
+                    ui.download.content(data, 'batch_patterns.zip')
                     _notify(f'Downloading {len(entries)} pattern CSV(s) as zip')
                 except Exception as ex:
                     traceback.print_exc()
+                    print(f'[EXPORT ERROR] {ex}', flush=True)
                     _notify_err(f'Export error: {ex}')
 
             def _clear_batch():
