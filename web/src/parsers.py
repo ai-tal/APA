@@ -35,7 +35,8 @@ class PatternData:
         ph_u = np.unique(ph)
         th_inc = float(np.median(np.diff(th_u))) if len(th_u) > 1 else 1.0
         ph_inc = float(np.median(np.diff(ph_u))) if len(ph_u) > 1 else 1.0
-        G = 20 * np.log10(np.abs(self.Eth) + 1e-20) if not self.is_gain_only else self.raw_data[:, self.gain_col_index]
+        G = (10 * np.log10(np.abs(self.Eth)**2 + np.abs(self.Eph)**2 + 1e-30)
+             if not self.is_gain_only else self.raw_data[:, self.gain_col_index])
         self.header = dict(
             theta_min=float(th.min()), theta_max=float(th.max()), theta_inc=th_inc,
             phi_min=float(ph.min()), phi_max=float(ph.max()), phi_inc=ph_inc,

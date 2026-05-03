@@ -337,9 +337,13 @@ def _build_grid_cache(theta, phi, G_total, G_RHCP, G_LHCP, AR, PLF):
 
     if not is_regular:
         from scipy.interpolate import griddata
+        # Cap grid dimensions so irregular/post-rotation data doesn't explode
+        MAX_TH, MAX_PH = 181, 361
+        th_u = np.linspace(float(theta.min()), float(theta.max()), min(nTh, MAX_TH))
+        ph_u = np.linspace(0.0, 360.0, min(nPh, MAX_PH))
+        nTh, nPh = len(th_u), len(ph_u)
+
         TH, PH = np.meshgrid(th_u, ph_u, indexing='ij')
-        pts = (theta, phi)
-        xi = (TH.ravel(), PH.ravel())
         pad_phi = np.concatenate([phi, phi - 360, phi + 360])
         pad_th  = np.concatenate([theta, theta, theta])
 

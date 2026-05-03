@@ -132,6 +132,48 @@ def main_page():
     ui.query('body').style(
         'background:#0d1117; color:#e0e0e0; font-family:Roboto,sans-serif')
 
+    # Light mode overrides — Quasar sets body--light when dark mode disabled
+    ui.add_head_html('''<style>
+/* ── Light mode global overrides ── */
+.body--light { background:#f5f7fa !important; color:#24292f !important; }
+.body--light .q-header  { background:#ffffff !important; border-color:#d0d7de !important; }
+.body--light .q-tabs    { background:#f0f2f5 !important; border-color:#d0d7de !important; }
+.body--light .q-tab-panels,
+.body--light .q-tab-panel { background:#f5f7fa !important; }
+.body--light .q-separator { background:#d0d7de !important; }
+/* Cards and panels keyed on inline bg colour */
+.body--light [style*="background:#161b22"] { background:#ffffff !important; border-color:#d0d7de !important; }
+.body--light [style*="background:#0d1117"] { background:#f5f7fa !important; }
+.body--light [style*="background:#1a1a2e"] { background:#f0f2f5 !important; }
+/* Scrollbar areas */
+.body--light [style*="background:#0d1117;"] { background:#f5f7fa !important; }
+/* Borders */
+.body--light [style*="border:1px solid #30363d"] { border-color:#d0d7de !important; }
+.body--light [style*="border-bottom:1px solid #30363d"] { border-color:#d0d7de !important; }
+/* Text colours */
+.body--light [style*="color:#8b949e"]  { color:#57606a !important; }
+.body--light [style*="color:#e0e0e0"]  { color:#24292f !important; }
+.body--light [style*="color:#58a6ff"]  { color:#0969da !important; }
+.body--light [style*="color:#4fc3f7"]  { color:#0288d1 !important; }
+.body--light .q-item__label--caption   { color:#57606a !important; }
+.body--light .q-item__label            { color:#24292f !important; }
+/* Tables */
+.body--light .q-table__container,
+.body--light .q-table th,
+.body--light .q-table td { background:#ffffff !important; color:#24292f !important;
+                            border-color:#d0d7de !important; }
+/* Inputs */
+.body--light .q-field__control,
+.body--light .q-field__native,
+.body--light .q-field__label { color:#24292f !important; }
+.body--light .q-field--outlined .q-field__control { border-color:#d0d7de !important; }
+/* Upload area */
+.body--light .q-uploader { background:#f0f2f5 !important; color:#24292f !important; }
+/* Scrollbar */
+.body--light ::-webkit-scrollbar-thumb { background:#adb5bd; }
+.body--light ::-webkit-scrollbar-track { background:#e9ecef; }
+</style>''')
+
     _dark = ui.dark_mode(value=True)
     _theme = {'dark': True}
 
@@ -751,7 +793,8 @@ def _build_coverage_tab():
                 cone_col.set_visibility(False)
 
                 def _on_mode_change(e):
-                    cone_col.set_visibility(e.args == 'Conical')
+                    val = e.args if isinstance(e.args, str) else str(e.args)
+                    cone_col.set_visibility('Conical' in val)
                 cov_mode.on('update:model-value', _on_mode_change)
 
                 ui.separator().style('background:#30363d')
@@ -1131,13 +1174,17 @@ def _build_combine_tab():
                     next_row = mask_rows[k + 1]
                     next_v1  = next_row.get('v1_el') or next_row.get('phi_min_el')
                     if next_v1 is not None:
-                        next_v1.set_value(round(float(e.value) + 1.0, 1))
+                        try:
+                            raw = e.args if hasattr(e, 'args') else getattr(e, 'value', None)
+                            next_v1.set_value(round(float(raw) + 1.0, 1))
+                        except (TypeError, ValueError):
+                            pass
             return _cascade
 
         for k, row_dict in enumerate(mask_rows):
             v2 = row_dict.get('v2_el') or row_dict.get('phi_max_el')
             if v2 is not None:
-                v2.on_change(_make_cascade(k))
+                v2.on('update:model-value', _make_cascade(k))
 
     cmb_refs['rebuild_mask_rows'] = _rebuild_mask_rows
 

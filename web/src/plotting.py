@@ -258,45 +258,121 @@ def plot_rect_cut(R: ProcessedPattern, cut_type: str = 'Phi Cut',
 def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
                       cut_type: str = 'Phi Cut', cut_value: float = 0.0,
                       cmin: float = None, cmax: float = None) -> go.Figure:
+    """Balanis-style filled polar: interior colored by gain, like a 2-D pattern filled
+    with a Jet colormap (blue=low, red=high), outline drawn on top."""
     if cmax is None: cmax = float(np.ceil(R.max_gain_dB / 5) * 5)
     if cmin is None: cmin = cmax - 50
 
     angles, G_tot, G_R, G_L = _cut_full360(R, cut_type, cut_value, component)
     comp_data = {'Total Gain': G_tot, 'RHCP Gain': G_R, 'LHCP Gain': G_L}
-    G_plot    = comp_data.get(component, G_tot)
-    shift     = -cmin
-    r_vals    = np.clip(G_plot, cmin, cmax) + shift
+    G_plot = comp_data.get(component, G_tot)
 
-    r_closed  = np.append(r_vals, r_vals[0])
-    a_closed  = np.append(angles,  angles[0])
+    # ── Build Cartesian raster: color(x,y) = G(phi) if inside pattern, else NaN ──
+    N = 500
+    G_clipped = np.clip(G_plot, cmin, cmax) - cmin       # radius in [0, cmax-cmin]
+    r_max = float(G_clipped.max()) + 1e-6
 
-    tick_max  = int(cmax - cmin) + 10
-    tick_vals = list(range(0, tick_max, 10))
-    tick_text = [f'{v + cmin:.0f}' for v in tick_vals]
+    xi = np.linspace(-r_max, r_max, N)
+    yi = np.linspace(-r_max, r_max, N)
+    XI, YI = np.meshgrid(xi, yi)
+
+    # Angle at each pixel (phi from top, clockwise — matches polar convention)
+    A_pix = np.rad2deg(np.arctan2(XI, YI)) % 360.0      # 0° = top, 90° = right
+    R_pix = np.sqrt(XI**2 + YI**2)                       # radial distance
+
+    # Interpolate pattern boundary and gain onto pixel angles
+    # Wrap for continuous interpolation across 0°/360°
+    ang_wrap = np.concatenate([angles - 360, angles, angles + 360])
+    G_wrap   = np.concatenate([G_clipped, G_clipped, G_clipped])
+    from scipy.interpolate import interp1d
+    boundary_fn = interp1d(ang_wrap, G_wrap, kind='linear',
+                            bounds_error=False, fill_value=0.0)
+    G_boundary = boundary_fn(A_pix)                       # radius of pattern at each pixel angle
+
+    # dB value at each pixel = G(phi) for pixels inside the pattern boundary
+    G_val = np.where(R_pix <= G_boundary, boundary_fn(A_pix) + cmin, np.nan)
+
+    # ── Jet colormap helper ──
+    def _jet_rgba(val, vmin, vmax):
+        """Return 'rgba(r,g,b,1)' jet color for scalar val in [vmin, vmax]."""
+        t = np.clip((val - vmin) / max(vmax - vmin, 1e-6), 0.0, 1.0)
+        r = np.clip(1.5 - np.abs(4.0*t - 3.0), 0.0, 1.0)
+        g = np.clip(1.5 - np.abs(4.0*t - 2.0), 0.0, 1.0)
+        b = np.clip(1.5 - np.abs(4.0*t - 1.0), 0.0, 1.0)
+        return np.stack([r, g, b], axis=-1)
+
+    # Build colorscale from jet (Plotly expects [[frac, 'rgb(...)'], ...])
+    n_cs = 64
+    t_arr = np.linspace(0, 1, n_cs)
+    cs_rgb = _jet_rgba(t_arr, 0.0, 1.0)
+    colorscale = [[float(t_arr[i]),
+                   f'rgb({int(cs_rgb[i,0]*255)},{int(cs_rgb[i,1]*255)},{int(cs_rgb[i,2]*255)})']
+                  for i in range(n_cs)]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(
-        r=r_closed, theta=a_closed, mode='lines',
-        fill='toself', fillcolor='rgba(79,195,247,0.20)',
-        line=dict(color='#4fc3f7', width=2),
-        name=component,
-        hovertemplate='%{theta:.1f}°: %{customdata:.2f} dB<extra></extra>',
-        customdata=np.append(G_plot, G_plot[0]),
+
+    # Heatmap — the colored fill
+    fig.add_trace(go.Heatmap(
+        x=xi, y=yi, z=G_val,
+        zmin=cmin, zmax=cmax,
+        colorscale=colorscale,
+        zsmooth='best',
+        colorbar=dict(title=f'{component} (dB)', tickfont=dict(color=_FONT_COLOR),
+                      titlefont=dict(color=_FONT_COLOR)),
+        hovertemplate='φ=%{customdata:.1f}°<br>' + component + '=%{z:.2f} dB<extra></extra>',
+        customdata=A_pix,
+        showscale=True,
     ))
 
+    # Outline — the exact pattern boundary (white/cyan line on top)
+    ang_rad = np.deg2rad(angles)
+    x_bnd = G_clipped * np.sin(ang_rad)
+    y_bnd = G_clipped * np.cos(ang_rad)
+    x_bnd = np.append(x_bnd, x_bnd[0])
+    y_bnd = np.append(y_bnd, y_bnd[0])
+    G_hover = np.append(G_plot, G_plot[0])
+    ang_hover = np.append(angles, angles[0])
+    fig.add_trace(go.Scatter(
+        x=x_bnd, y=y_bnd,
+        mode='lines',
+        line=dict(color='rgba(255,255,255,0.85)', width=1.5),
+        name='Boundary',
+        customdata=np.stack([ang_hover, G_hover], axis=-1),
+        hovertemplate='φ=%{customdata[0]:.1f}°<br>' + component + '=%{customdata[1]:.2f} dB<extra></extra>',
+        showlegend=False,
+    ))
+
+    # Concentric dB rings
+    ring_r = np.linspace(0, 2*np.pi, 361)
+    for db_val in range(int(cmin), int(cmax)+1, 10):
+        rr = db_val - cmin
+        if rr <= 0: continue
+        fig.add_trace(go.Scatter(
+            x=rr * np.sin(ring_r), y=rr * np.cos(ring_r),
+            mode='lines', line=dict(color='rgba(255,255,255,0.15)', width=0.7),
+            showlegend=False, hoverinfo='skip'))
+        if rr <= r_max:
+            fig.add_annotation(x=rr * 0.04, y=rr,
+                               text=f'{db_val}dB', showarrow=False,
+                               font=dict(color='rgba(255,255,255,0.45)', size=7))
+
+    # Phi angle labels
+    lbl_r = r_max * 1.10
+    for ph_d in range(0, 360, 30):
+        ph_r = np.deg2rad(ph_d)
+        fig.add_annotation(x=lbl_r * np.sin(ph_r), y=lbl_r * np.cos(ph_r),
+                           text=f'{ph_d}°', showarrow=False,
+                           font=dict(color=_FONT_COLOR, size=9))
+
+    _ax_bare = dict(gridcolor=_GRID_COLOR, zerolinecolor=_GRID_COLOR,
+                    showgrid=False, zeroline=False, showticklabels=False, title='')
+    pad = r_max * 1.18
     fig.update_layout(
         **_LAYOUT_BASE,
         title=dict(text=f'Filled Polar — {cut_type} @ {cut_value:.1f}°  [{component}]',
                    font=dict(color=_FONT_COLOR)),
-        polar=dict(
-            bgcolor=_BG,
-            angularaxis=dict(tickcolor=_FONT_COLOR, gridcolor=_GRID_COLOR,
-                             direction='clockwise', rotation=90,
-                             tickfont=dict(color=_FONT_COLOR)),
-            radialaxis=dict(tickvals=tick_vals, ticktext=tick_text,
-                            gridcolor=_GRID_COLOR, tickfont=dict(color=_FONT_COLOR),
-                            range=[0, cmax - cmin]),
-        ),
+        xaxis={**_ax_bare, 'scaleanchor': 'y', 'range': [-pad, pad]},
+        yaxis={**_ax_bare, 'range': [-pad, pad]},
     )
     return fig
 
@@ -320,11 +396,8 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
     Z = r * np.cos(TH)
 
     r_max = float(r.max())
-    hover_text = [
-        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f} dB'
-         for j in range(gw.shape[1])]
-        for i in range(gw.shape[0])
-    ]
+    # customdata shape (nTh, nPh, 3): [theta_deg, phi_deg, gain_dB]
+    cd = np.stack([TH_deg, PH_deg, gw], axis=-1)
 
     _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
                     title='', showaxeslabels=False, showbackground=False,
@@ -336,8 +409,11 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
         surfacecolor=gw, cmin=cmin, cmax=cmax,
         colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
-        text=hover_text,
-        hoverinfo='text',
+        customdata=cd,
+        hovertemplate=(
+            'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
+            + label + '=%{customdata[2]:.2f}<extra></extra>'
+        ),
     ))
     for ax in _xyz_axes(r_max * 1.25):
         fig.add_trace(ax)
@@ -370,11 +446,7 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
     Y = np.sin(TH) * np.sin(PH)
     Z = np.cos(TH)
 
-    hover_text = [
-        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f} dB'
-         for j in range(gw.shape[1])]
-        for i in range(gw.shape[0])
-    ]
+    cd = np.stack([TH_deg, PH_deg, gw], axis=-1)
 
     _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
                     title='', showaxeslabels=False, showbackground=False,
@@ -386,8 +458,11 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
         surfacecolor=gw, cmin=cmin, cmax=cmax,
         colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
-        text=hover_text,
-        hoverinfo='text',
+        customdata=cd,
+        hovertemplate=(
+            'θ=%{customdata[0]:.1f}°  φ=%{customdata[1]:.1f}°<br>'
+            + label + '=%{customdata[2]:.2f}<extra></extra>'
+        ),
     ))
     for ax in _xyz_axes(1.35):
         fig.add_trace(ax)
@@ -518,16 +593,13 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
     )
 
     pad = th_max * 1.25
+    _ax_bare = dict(gridcolor=_GRID_COLOR, zerolinecolor=_GRID_COLOR,
+                    showgrid=False, zeroline=False, showticklabels=False, title='')
     fig.update_layout(
         **_LAYOUT_BASE,
         title=dict(text=f'Circular — {label}', font=dict(color=_FONT_COLOR)),
-        xaxis=_axis_style(
-            title='', scaleanchor='y',
-            showticklabels=False, showgrid=False, zeroline=False,
-            range=[-pad, pad]),
-        yaxis=_axis_style(
-            title='', showticklabels=False, showgrid=False, zeroline=False,
-            range=[-pad, pad]),
+        xaxis={**_ax_bare, 'scaleanchor': 'y', 'range': [-pad, pad]},
+        yaxis={**_ax_bare, 'range': [-pad, pad]},
     )
     return fig
 
