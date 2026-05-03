@@ -523,31 +523,6 @@ def _build_single_tab():
                     ).props('dense flat virtual-scroll sticky-header').style(
                         'height:240px').classes('w-full')
                     plot_refs['_all_in_rows'] = []
-                    def _filter_in(val=''):
-                        v = str(val or '').strip().lower()
-                        src = plot_refs['_all_in_rows']
-                        if v:
-                            tbl_in.rows = [r for r in src
-                                           if any(v in str(x).lower()
-                                                  for x in r.values())]
-                        else:
-                            tbl_in.rows = src[:_TBL_CAP]
-                            if len(src) > _TBL_CAP:
-                                tbl_in.rows.append(dict(
-                                    row_num='…',
-                                    theta=f'showing {_TBL_CAP:,} of {len(src):,} '
-                                          f'rows — use filter or Export CSV',
-                                    phi='', gth='', gph='', pth='', pph=''))
-                        tbl_in.update()
-                    with tbl_in.add_slot('top'):
-                        with ui.row().classes('w-full items-center gap-1').style(
-                                'padding:2px 6px'):
-                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
-                            ui.input(placeholder='Filter rows…').props(
-                                'dense borderless clearable'
-                            ).classes('flex-1').on(
-                                'update:model-value',
-                                lambda e: _filter_in(e.args))
 
                 with ui.tab_panel(dt_data):
                     _DATA_COLS = [
@@ -566,32 +541,6 @@ def _build_single_tab():
                     ).props('dense flat virtual-scroll sticky-header').style(
                         'height:240px').classes('w-full')
                     plot_refs['_all_data_rows'] = []
-                    def _filter_data(val=''):
-                        v = str(val or '').strip().lower()
-                        src = plot_refs['_all_data_rows']
-                        if v:
-                            tbl_data.rows = [r for r in src
-                                             if any(v in str(x).lower()
-                                                    for x in r.values())]
-                        else:
-                            tbl_data.rows = src[:_TBL_CAP]
-                            if len(src) > _TBL_CAP:
-                                tbl_data.rows.append(dict(
-                                    row_num='…',
-                                    theta=f'showing {_TBL_CAP:,} of {len(src):,} '
-                                          f'rows — use filter or Export CSV',
-                                    phi='', gtot='', grhcp='', glhcp='',
-                                    ar='', plf='', eirp=''))
-                        tbl_data.update()
-                    with tbl_data.add_slot('top'):
-                        with ui.row().classes('w-full items-center gap-1').style(
-                                'padding:2px 6px'):
-                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
-                            ui.input(placeholder='Filter rows…').props(
-                                'dense borderless clearable'
-                            ).classes('flex-1').on(
-                                'update:model-value',
-                                lambda e: _filter_data(e.args))
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
             tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
@@ -735,10 +684,15 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
         if isinstance(cc, list) and len(cc) == 0:
             cc = ['Total Gain', 'RHCP Gain', 'LHCP Gain']
 
-        # AR: auto-set symmetric limits only when first switching TO Axial Ratio;
-        #     subsequent refreshes while already on AR use the user's current values.
+        # AR colormap handling:
+        #   - Switching TO AR: save current limits, auto-set symmetric AR limits.
+        #   - While on AR: use whatever the user has set.
+        #   - Switching FROM AR: restore the pre-AR limits.
         if comp_dd.value == 'Axial Ratio':
             if plot_refs.get('last_comp') != 'Axial Ratio':
+                # Save pre-AR limits so we can restore them later
+                plot_refs['pre_ar_cmin'] = cmin_inp.value
+                plot_refs['pre_ar_cmax'] = cmax_inp.value
                 raw_max = float(np.nanmax(R.AR_dB))
                 cmax_ar = min(float(np.ceil(max(raw_max, 1.0) / 5) * 5), 30.0)
                 cmin_ar = -cmax_ar
@@ -749,6 +703,16 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
             cmin = float(cmin_inp.value or -30)
             cmax = float(cmax_inp.value or  30)
         else:
+            if plot_refs.get('last_comp') == 'Axial Ratio':
+                # Switching FROM AR: restore saved limits
+                saved_min = plot_refs.get('pre_ar_cmin')
+                saved_max = plot_refs.get('pre_ar_cmax')
+                plot_refs['ar_updating'] = True
+                if saved_min is not None:
+                    cmin_inp.set_value(saved_min)
+                if saved_max is not None:
+                    cmax_inp.set_value(saved_max)
+                plot_refs['ar_updating'] = False
             cmin = float(cmin_inp.value if cmin_inp.value is not None else -50)
             cmax = float(cmax_inp.value if cmax_inp.value is not None else   0)
         plot_refs['last_comp'] = comp_dd.value
@@ -870,14 +834,16 @@ def _build_batch_tab():
                                                      cone_axis_th=th,
                                                      cone_axis_ph=ph,
                                                      cone_half_angle=c))
+                                ent['cov_con_ha'] = cone_ha
                             cov_ok += 1
                         except Exception as ex:
                             traceback.print_exc()
 
                 refs['refresh_list'](refs['file_list'])
                 refs['refresh_summary'](refs['summary_plot'])
-                refs['lbl_status'].set_text(f'{ok}/{total} processed — click Export CSV to download')
+                refs['lbl_status'].set_text(f'{ok}/{total} processed — exporting…')
                 _notify(f'Batch complete: {ok}/{total} OK')
+                await _export_batch_csv()
 
             async def _export_batch_csv():
                 import zipfile, io as _bio
@@ -920,7 +886,8 @@ def _build_batch_tab():
                             con_ents = [e for e in cov_entries if 'cov_con' in e]
                             if con_ents:
                                 hdr = 'threshold_dBi,' + ','.join(
-                                    e['name'] + '_con_%' for e in con_ents)
+                                    f'{e["name"]}_con{int(e.get("cov_con_ha", 0))}_%'
+                                    for e in con_ents)
                                 con_rows = [hdr]
                                 for i, t in enumerate(thr):
                                     vals = ','.join(
