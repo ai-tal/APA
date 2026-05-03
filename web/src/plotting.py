@@ -127,9 +127,9 @@ def _find_hpbw_crossings(angles: np.ndarray, G: np.ndarray):
 def _xyz_axes(r_scale: float, colorX='#ff4444', colorY='#44ff44', colorZ='#4fc3f7'):
     """Return three Scatter3d traces for X, Y, Z principal axes."""
     axes = []
-    for vec, col, lbl in [([r_scale, 0, 0], colorX, 'X'),
-                           ([0, r_scale, 0], colorY, 'Y'),
-                           ([0, 0, r_scale], colorZ, 'Z')]:
+    for vec, col, lbl in [([r_scale, 0, 0], colorX, 'X (φ=0°)'),
+                           ([0, r_scale, 0], colorY, 'Y (φ=90°)'),
+                           ([0, 0, r_scale], colorZ, 'Z (θ=0°)')]:
         axes.append(go.Scatter3d(
             x=[0, vec[0]], y=[0, vec[1]], z=[0, vec[2]],
             mode='lines+text',

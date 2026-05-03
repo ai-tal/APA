@@ -1,12 +1,13 @@
 """
 Antenna Pattern Analyzer (APA) — unified Python/NiceGUI implementation.
 """
-import sys, os, traceback
+import sys, os, traceback, secrets
 sys.path.insert(0, os.path.dirname(__file__))
 
 import asyncio
 import numpy as np
 from nicegui import ui, app
+from starlette.responses import Response as _StarResponse
 
 from src.parsers import load_pattern
 from src.processing import (process_pattern, combine_patterns, compute_coverage,
@@ -21,8 +22,17 @@ from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
                            plot_coverage_cdf, plot_batch_summary, auto_clim,
                            set_plot_theme)
 
-# ── Table display cap (rows sent to browser at once) ─────────────────────────
-_TBL_CAP = 5000  # virtual-scroll handles render; this prevents WebSocket flood
+# ── Download store: large files served via HTTP endpoint, not WebSocket ───────
+_DL_STORE: dict[str, bytes] = {}
+
+@app.get('/api/dl/{token}')
+async def _dl_endpoint(token: str):
+    data = _DL_STORE.pop(token, None)
+    if data is None:
+        return _StarResponse(status_code=404)
+    return _StarResponse(
+        content=data, media_type='application/zip',
+        headers={'Content-Disposition': 'attachment; filename="batch_patterns.zip"'})
 
 # ── Orientation presets (matches MATLAB DropDown_InitOri) ────────────────────
 _ORI_PRESETS = {
@@ -153,6 +163,19 @@ _SUN_SVG = (
 @ui.page('/')
 def main_page():
     ui.query('body').style('font-family:Roboto,sans-serif')
+
+    ui.add_head_html('''<style>
+/* ── Sticky header for APA data tables ─────────────────────────────────── */
+.apa-tbl thead tr th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2 !important;
+  background: #16213e !important;
+}
+.body--light .apa-tbl thead tr th {
+  background: #f5f7fa !important;
+}
+</style>''')
 
     ui.add_head_html('''<script>
 function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
@@ -520,8 +543,8 @@ def _build_single_tab():
                     ]
                     tbl_in = ui.table(
                         columns=_IN_COLS, rows=[], row_key='row_num',
-                    ).props('dense flat virtual-scroll sticky-header').style(
-                        'height:240px').classes('w-full')
+                    ).props('dense flat virtual-scroll virtual-scroll-sticky-size-start=28 rows-per-page=0').style(
+                        'height:240px').classes('w-full apa-tbl')
                     plot_refs['_all_in_rows'] = []
 
                 with ui.tab_panel(dt_data):
@@ -538,8 +561,8 @@ def _build_single_tab():
                     ]
                     tbl_data = ui.table(
                         columns=_DATA_COLS, rows=[], row_key='row_num',
-                    ).props('dense flat virtual-scroll sticky-header').style(
-                        'height:240px').classes('w-full')
+                    ).props('dense flat virtual-scroll virtual-scroll-sticky-size-start=28 rows-per-page=0').style(
+                        'height:240px').classes('w-full apa-tbl')
                     plot_refs['_all_data_rows'] = []
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
@@ -613,7 +636,6 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         lbl_hpbw.set_text(f'HPBW  E:{he}  H:{hh}{fb}')
 
         n = len(P.theta)
-        _TBL_CAP = 5000  # rows sent to browser; filter searches full dataset
 
         # ── Input data table ────────────────────────────────────────────────
         Gth = 20 * np.log10(np.abs(P.Eth) + 1e-30)
@@ -628,12 +650,7 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_in_rows'] = all_in
-        tbl_in.rows = all_in[:_TBL_CAP]
-        if n > _TBL_CAP:
-            tbl_in.rows.append(dict(
-                row_num='…',
-                theta=f'showing {_TBL_CAP:,} of {n:,} rows — use filter or Export CSV for full data',
-                phi='', gth='', gph='', pth='', pph=''))
+        tbl_in.rows = all_in
         tbl_in.update()
 
         # ── Output data table ───────────────────────────────────────────────
@@ -649,12 +666,7 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_data_rows'] = all_data
-        tbl_data.rows = all_data[:_TBL_CAP]
-        if n > _TBL_CAP:
-            tbl_data.rows.append(dict(
-                row_num='…',
-                theta=f'showing {_TBL_CAP:,} of {n:,} rows — use filter or Export CSV for full data',
-                phi='', gtot='', grhcp='', glhcp='', ar='', plf='', eirp=''))
+        tbl_data.rows = all_data
         tbl_data.update()
 
         # ── Output metrics table ──────────────────────────────────────────
@@ -898,7 +910,10 @@ def _build_batch_tab():
                                             '\n'.join(con_rows))
 
                     data = buf.getvalue()
-                    ui.download.content(data, 'batch_patterns.zip')
+                    token = secrets.token_hex(16)
+                    _DL_STORE[token] = data
+                    await ui.run_javascript(
+                        f'window.location.href = "/api/dl/{token}"')
                     _notify(f'Downloading {len(entries)} pattern CSV(s) as zip')
                 except Exception as ex:
                     traceback.print_exc()
