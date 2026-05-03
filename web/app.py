@@ -12,11 +12,28 @@ from src.parsers import load_pattern
 from src.processing import (process_pattern, combine_patterns, compute_coverage,
                              rotation_matrix_from_vectors, apply_rotation,
                              rotate_processed_pattern,
-                             get_component_grid, get_cut)
+                             get_component_grid, get_cut, detect_boresight)
 from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
                            plot_3d_pattern, plot_3d_sphere,
                            plot_circular, plot_filled_polar,
-                           plot_coverage_cdf, plot_batch_summary, auto_clim)
+                           plot_coverage_cdf, plot_batch_summary, auto_clim,
+                           set_plot_theme)
+
+# ── Orientation presets (matches MATLAB DropDown_InitOri) ────────────────────
+_ORI_PRESETS = {
+    '+Z (Overhead)': (0.0,   0.0),
+    '-Z (Deck)':     (180.0, 0.0),
+    '+X (Forward)':  (90.0,  0.0),
+    '-X (Aft)':      (90.0,  180.0),
+    '+Y (Stbd)':     (90.0,  90.0),
+    '-Y (Port)':     (90.0,  270.0),
+    'Custom...':     None,
+}
+_BORESIGHT_TO_ORI = {
+    '+Z': '+Z (Overhead)', '-Z': '-Z (Deck)',
+    '+X': '+X (Forward)',  '-X': '-X (Aft)',
+    '+Y': '+Y (Stbd)',     '-Y': '-Y (Port)',
+}
 
 # ── Module-level state ───────────────────────────────────────────────────────
 _state = dict(
@@ -178,10 +195,12 @@ function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
             _theme['dark'] = not _theme['dark']
             if _theme['dark']:
                 _dark.enable()
+                set_plot_theme(True)
                 _theme_icon.set_content(_SUN_SVG)
                 ui.run_javascript('_apaRelayoutPlotly("#16213e","#1a1a2e","#e0e0e0")')
             else:
                 _dark.disable()
+                set_plot_theme(False)
                 _theme_icon.set_content(_MOON_SVG)
                 ui.run_javascript('_apaRelayoutPlotly("#f5f7fa","#f0f2f5","#24292f")')
 
@@ -293,11 +312,48 @@ def _build_single_tab():
                         'flat color=purple size=sm').classes('flex-1')
 
             with _card('Rotation (cumulative SO(3))'):
+                # Source orientation preset dropdown
+                src_ori = ui.select(
+                    list(_ORI_PRESETS.keys()),
+                    value='+Z (Overhead)',
+                    label='Source Orientation',
+                ).props('dense outlined').classes('w-full')
+
                 with ui.grid(columns=2).classes('w-full gap-1'):
                     src_th = ui.number('Src θ (°)', value=0.0).props('dense outlined')
                     src_ph = ui.number('Src φ (°)', value=0.0).props('dense outlined')
                     dst_th = ui.number('Dst θ (°)', value=0.0).props('dense outlined')
                     dst_ph = ui.number('Dst φ (°)', value=0.0).props('dense outlined')
+
+                def _sync_src_spinners(_e=None):
+                    coords = _ORI_PRESETS.get(src_ori.value)
+                    if coords is not None:
+                        src_th.set_value(coords[0])
+                        src_ph.set_value(coords[1])
+
+                def _on_src_spinner(_e=None):
+                    src_ori.set_value('Custom...')
+
+                def _auto_detect_src():
+                    if _state['R_single'] is None:
+                        _notify_err('Process a pattern first.'); return
+                    d = detect_boresight(_state['R_single'])
+                    label = _BORESIGHT_TO_ORI.get(d, 'Custom...')
+                    src_ori.set_value(label)
+                    coords = _ORI_PRESETS.get(label)
+                    if coords:
+                        src_th.set_value(coords[0])
+                        src_ph.set_value(coords[1])
+                    _notify(f'Detected source boresight: {d}')
+
+                src_ori.on('update:model-value', _sync_src_spinners)
+                src_th.on('update:model-value', _on_src_spinner)
+                src_ph.on('update:model-value', _on_src_spinner)
+
+                # Store ref so _do_process_single can trigger auto-detect after load
+                plot_refs['src_ori'] = src_ori
+                plot_refs['src_th']  = src_th
+                plot_refs['src_ph']  = src_ph
 
                 def _do_rotate():
                     if _state['R_single_base'] is None:
@@ -307,11 +363,13 @@ def _build_single_tab():
                             float(src_th.value), float(src_ph.value),
                             float(dst_th.value), float(dst_ph.value))
                         _state['rot_matrix'] = _state['rot_matrix'] @ R_mat
-                        # Rotate the GRID (fast, no re-meshing) on top of current result
                         _state['R_single'] = rotate_processed_pattern(
                             _state['R_single'], R_mat)
                         R = _state['R_single']
-                        # Update metrics labels
+                        # Dst becomes new Src after rotation
+                        src_th.set_value(float(dst_th.value))
+                        src_ph.set_value(float(dst_ph.value))
+                        src_ori.set_value('Custom...')
                         dir_str = f'θ={R.max_gain_dir[0]:.1f}° φ={R.max_gain_dir[1]:.1f}°'
                         lbl_peak.set_text(f'Peak: {R.max_gain_dB:.2f} dBi  @  {dir_str}')
                         _update_single_plot(
@@ -337,9 +395,19 @@ def _build_single_tab():
                             plot_refs['cmin_inp'], plot_refs['cmax_inp'],
                             plot_refs['cb_peak'],  plot_refs['cb_hpbw'],
                             plot_refs['cut_comp'])
+                    # Re-run auto-detect on the base pattern
+                    if _state['R_single_base'] is not None:
+                        d = detect_boresight(_state['R_single_base'])
+                        label = _BORESIGHT_TO_ORI.get(d, '+Z (Overhead)')
+                        src_ori.set_value(label)
+                        coords = _ORI_PRESETS.get(label, (0.0, 0.0))
+                        src_th.set_value(coords[0])
+                        src_ph.set_value(coords[1])
                     _notify('Rotation reset to original.')
 
                 with ui.row().classes('w-full gap-1'):
+                    ui.button('Auto-detect', on_click=_auto_detect_src,
+                              icon='my_location').props('flat color=teal size=sm').classes('flex-1')
                     ui.button('Rotate', on_click=_do_rotate, icon='360').props(
                         'flat color=orange').classes('flex-1')
                     ui.button('Reset',  on_click=_reset_rot, icon='undo').props(
@@ -511,6 +579,15 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         if not np.allclose(rot, np.eye(3)):
             R = rotate_processed_pattern(R, rot)
         _state['R_single'] = R
+
+        # Auto-detect boresight and update source spinners
+        if 'src_ori' in plot_refs:
+            d = detect_boresight(R)
+            label = _BORESIGHT_TO_ORI.get(d, '+Z (Overhead)')
+            coords = _ORI_PRESETS.get(label, (0.0, 0.0))
+            plot_refs['src_ori'].set_value(label)
+            plot_refs['src_th'].set_value(coords[0])
+            plot_refs['src_ph'].set_value(coords[1])
 
         cmin, cmax = auto_clim(R.max_gain_dB)
         plot_refs['cmin_inp'].set_value(cmin)
@@ -828,9 +905,43 @@ def _build_coverage_tab():
                     'inline color=blue').classes('w-full')
 
                 with ui.column().classes('w-full gap-1') as cone_col:
+                    cone_ori = ui.select(
+                        list(_ORI_PRESETS.keys()),
+                        value='+Z (Overhead)',
+                        label='Cone Axis Orientation',
+                    ).props('dense outlined').classes('w-full')
                     cone_th  = ui.number('Cone axis θ (°)', value=0.0,  format='%.1f').props('dense outlined')
                     cone_ph  = ui.number('Cone axis φ (°)', value=0.0,  format='%.1f').props('dense outlined')
                     cone_ang = ui.number('Half-angle (°)',  value=60.0, format='%.1f').props('dense outlined')
+
+                    def _sync_cone_spinners(_e=None):
+                        coords = _ORI_PRESETS.get(cone_ori.value)
+                        if coords is not None:
+                            cone_th.set_value(coords[0])
+                            cone_ph.set_value(coords[1])
+
+                    def _on_cone_spinner(_e=None):
+                        cone_ori.set_value('Custom...')
+
+                    def _auto_detect_cone():
+                        pats = [p for p in _state['cov_patterns'] if p.get('enabled', True)]
+                        if not pats: _notify_err('Load a pattern first.'); return
+                        d = detect_boresight(pats[0]['R'])
+                        label = _BORESIGHT_TO_ORI.get(d, 'Custom...')
+                        cone_ori.set_value(label)
+                        coords = _ORI_PRESETS.get(label)
+                        if coords:
+                            cone_th.set_value(coords[0])
+                            cone_ph.set_value(coords[1])
+                        _notify(f'Cone axis auto-detected: {d}')
+
+                    cone_ori.on('update:model-value', _sync_cone_spinners)
+                    cone_th.on('update:model-value', _on_cone_spinner)
+                    cone_ph.on('update:model-value', _on_cone_spinner)
+
+                    ui.button('Auto-detect cone axis', on_click=_auto_detect_cone,
+                              icon='my_location').props('flat color=teal size=sm').classes('w-full')
+
                 cone_col.set_visibility(False)
 
                 def _on_mode_change(_e=None):

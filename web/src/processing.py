@@ -653,3 +653,32 @@ def _build_regional_mask(TH_deg, PH_deg, mask_def: dict) -> np.ndarray:
         return phi_ok & th_ok
     else:
         return np.ones_like(TH_rad, dtype=bool)
+
+
+def detect_boresight(R: 'ProcessedPattern') -> str:
+    """Port of MATLAB detectBoresight.m.
+    Returns one of '+X','-X','+Y','-Y','+Z','-Z' — the cardinal axis that
+    receives the most solid-angle-weighted power within a 45° half-cone."""
+    cos_thr = np.cos(np.deg2rad(45.0))
+    TH2, PH2 = np.meshgrid(np.deg2rad(R.theta_vec),
+                            np.deg2rad(R.phi_vec), indexing='ij')
+    sx = np.sin(TH2) * np.cos(PH2)
+    sy = np.sin(TH2) * np.sin(PH2)
+    sz = np.cos(TH2)
+    dA   = np.sin(TH2)
+    Gpow = 10.0 ** (R.G_grid / 10.0)
+
+    cand_dirs = ['+X', '-X', '+Y', '-Y', '+Z', '-Z']
+    cand_vecs = np.array([[ 1, 0, 0], [-1, 0, 0],
+                           [ 0, 1, 0], [ 0,-1, 0],
+                           [ 0, 0, 1], [ 0, 0,-1]], dtype=float)
+    best_score, best_dir = -np.inf, '+Z'
+    for d, v in zip(cand_dirs, cand_vecs):
+        cos_a = v[0]*sx + v[1]*sy + v[2]*sz
+        mask  = cos_a >= cos_thr
+        w_sum = float(np.sum(dA[mask]))
+        if w_sum > 0:
+            score = float(np.sum(Gpow[mask] * dA[mask])) / w_sum
+            if score > best_score:
+                best_score, best_dir = score, d
+    return best_dir

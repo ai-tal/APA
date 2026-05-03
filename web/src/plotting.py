@@ -9,10 +9,10 @@ from .processing import ProcessedPattern, get_component_grid, get_cut
 
 
 _COLORSCALE = 'Jet'
-_BG         = '#1a1a2e'
-_PAPER      = '#16213e'
-_FONT_COLOR = '#e0e0e0'
-_GRID_COLOR = '#334466'
+_BG         = '#ffffff'
+_PAPER      = '#f5f7fa'
+_FONT_COLOR = '#24292f'
+_GRID_COLOR = '#c0c8d8'
 
 # Fixed per-component colours (Total=blue, RHCP=red, LHCP=green) — preserved across all cut plots
 _COMP_STYLES = {
@@ -28,6 +28,22 @@ _LAYOUT_BASE = dict(
     font=dict(color=_FONT_COLOR, size=11),
     margin=dict(l=50, r=20, t=40, b=40),
 )
+
+
+def set_plot_theme(dark: bool) -> None:
+    """Switch all subsequent plot builds to dark or light palette."""
+    global _BG, _PAPER, _FONT_COLOR, _GRID_COLOR
+    if dark:
+        _BG = '#1a1a2e'; _PAPER = '#16213e'
+        _FONT_COLOR = '#e0e0e0'; _GRID_COLOR = '#334466'
+    else:
+        _BG = '#ffffff'; _PAPER = '#f5f7fa'
+        _FONT_COLOR = '#24292f'; _GRID_COLOR = '#c0c8d8'
+    _LAYOUT_BASE.update(
+        paper_bgcolor=_PAPER,
+        plot_bgcolor=_BG,
+        font=dict(color=_FONT_COLOR, size=11),
+    )
 
 
 def _ar_colorscale(N: int = 64) -> list:
@@ -163,9 +179,9 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
         fig.add_trace(go.Scatter(
             x=[R.max_gain_dir[1]], y=[R.max_gain_dir[0]],
             mode='markers+text',
-            marker=dict(symbol='cross', size=12, color='white', line=dict(width=2)),
+            marker=dict(symbol='cross', size=12, color=_FONT_COLOR, line=dict(width=2)),
             text=[f'{R.max_gain_dB:.1f} dBi'], textposition='top right',
-            textfont=dict(color='white', size=10),
+            textfont=dict(color=_FONT_COLOR, size=10),
             showlegend=False, name='Peak',
         ))
 
@@ -409,7 +425,7 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
         showscale=True,
     ))
 
-    # Outline — the exact pattern boundary (white/cyan line on top)
+    # Outline — the exact pattern boundary (theme-aware line on top)
     ang_rad = np.deg2rad(angles)
     x_bnd = G_clipped * np.sin(ang_rad)
     y_bnd = G_clipped * np.cos(ang_rad)
@@ -420,7 +436,7 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
     fig.add_trace(go.Scatter(
         x=x_bnd, y=y_bnd,
         mode='lines',
-        line=dict(color='rgba(255,255,255,0.85)', width=1.5),
+        line=dict(color=_FONT_COLOR, width=1.5),
         name='Boundary',
         customdata=np.stack([ang_hover, G_hover], axis=-1),
         hovertemplate='φ=%{customdata[0]:.1f}°<br>' + component + '=%{customdata[1]:.2f} dB<extra></extra>',
@@ -434,12 +450,12 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
         if rr <= 0: continue
         fig.add_trace(go.Scatter(
             x=rr * np.sin(ring_r), y=rr * np.cos(ring_r),
-            mode='lines', line=dict(color='rgba(255,255,255,0.15)', width=0.7),
+            mode='lines', line=dict(color=_GRID_COLOR, width=0.7),
             showlegend=False, hoverinfo='skip'))
         if rr <= r_max:
             fig.add_annotation(x=rr * 0.04, y=rr,
                                text=f'{db_val}dB', showarrow=False,
-                               font=dict(color='rgba(255,255,255,0.45)', size=7))
+                               font=dict(color=_GRID_COLOR, size=7))
 
     # Phi angle labels
     lbl_r = r_max * 1.10
