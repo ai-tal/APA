@@ -308,10 +308,10 @@ def _build_single_tab():
                     _ui_tabs['tabs'].set_value(_ui_tabs['t_combine'])
 
                 with ui.row().classes('w-full gap-1'):
-                    ui.button('→ Coverage', on_click=_send_to_coverage, icon='radar').props(
-                        'flat color=green size=sm').classes('flex-1').style('height:34px')
-                    ui.button('→ Combine',  on_click=_send_to_combine,  icon='merge').props(
-                        'flat color=purple size=sm').classes('flex-1').style('height:34px')
+                    ui.button('Coverage', on_click=_send_to_coverage, icon='radar').props(
+                        'flat color=green size=sm stack').classes('flex-1').style('min-height:48px')
+                    ui.button('Combine',  on_click=_send_to_combine,  icon='merge').props(
+                        'flat color=purple size=sm stack').classes('flex-1').style('min-height:48px')
 
             with _card('Rotation (cumulative SO(3))'):
                 # Source orientation preset dropdown
@@ -518,25 +518,50 @@ def _build_single_tab():
                     tbl_in = ui.table(
                         columns=_IN_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
-                        'height:240px').classes('w-full')
+                        'height:280px').classes('w-full')
                     plot_refs['_all_in_rows'] = []
-                    def _filter_in(val=''):
-                        v = str(val or '').strip().lower()
-                        src = plot_refs['_all_in_rows']
-                        tbl_in.rows = (
-                            [r for r in src
-                             if any(v in str(x).lower() for x in r.values())][:_MAX_TBL]
-                            if v else src[:_MAX_TBL])
+                    plot_refs['_in_col_filters'] = {
+                        cn: '' for cn in ['theta','phi','gth','gph','pth','pph']}
+
+                    def _apply_in_col_filter():
+                        src = plot_refs.get('_all_in_rows', [])
+                        result = src
+                        for cn, fv in plot_refs['_in_col_filters'].items():
+                            if fv:
+                                result = [r for r in result
+                                          if fv in str(r.get(cn, '')).lower()]
+                        tbl_in.rows = result
                         tbl_in.update()
-                    with tbl_in.add_slot('top'):
-                        with ui.row().classes('w-full items-center gap-1').style(
-                                'padding:2px 6px'):
-                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
-                            ui.input(placeholder='Filter rows…').props(
-                                'dense borderless clearable'
-                            ).classes('flex-1').on(
-                                'update:model-value',
-                                lambda e: _filter_in(e.args))
+
+                    _IN_HDR = {'theta': 'θ (°)', 'phi': 'φ (°)',
+                               'gth': '|Eθ| dB', 'gph': '|Eφ| dB',
+                               'pth': '∠Eθ (°)', 'pph': '∠Eφ (°)'}
+                    for _cn, _cl in _IN_HDR.items():
+                        tbl_in.add_slot(f'header-cell-{_cn}', f'''
+                            <q-th :props="props"
+                                  style="padding:2px 6px; vertical-align:top">
+                              <div style="font-weight:600;font-size:0.78rem;
+                                          white-space:nowrap;line-height:1.4"
+                                   class="cursor-pointer"
+                                   @click="props.col.sortable && props.sort(props.col)">
+                                {_cl}
+                                <q-icon v-if="props.col.sorted"
+                                        :name="props.col.descending
+                                               ? \'arrow_downward\' : \'arrow_upward\'"
+                                        style="font-size:0.75rem;color:#58a6ff"/>
+                              </div>
+                              <q-input dense borderless clearable
+                                       placeholder="▽"
+                                       input-style="font-size:0.7rem"
+                                       style="min-width:0;margin-top:1px"
+                                       @update:model-value=
+                                         "$emit(\'colfilter-{_cn}\', $event)" />
+                            </q-th>''')
+                        tbl_in.on(f'colfilter-{_cn}',
+                                  lambda e, c=_cn: (
+                                      plot_refs['_in_col_filters'].update(
+                                          {c: str(e.args or '').strip().lower()}),
+                                      _apply_in_col_filter()))
 
                 with ui.tab_panel(dt_data):
                     _DATA_COLS = [
@@ -553,25 +578,53 @@ def _build_single_tab():
                     tbl_data = ui.table(
                         columns=_DATA_COLS, rows=[], row_key='row_num',
                     ).props('dense flat virtual-scroll sticky-header').style(
-                        'height:240px').classes('w-full')
+                        'height:280px').classes('w-full')
                     plot_refs['_all_data_rows'] = []
-                    def _filter_data(val=''):
-                        v = str(val or '').strip().lower()
-                        src = plot_refs['_all_data_rows']
-                        tbl_data.rows = (
-                            [r for r in src
-                             if any(v in str(x).lower() for x in r.values())][:_MAX_TBL]
-                            if v else src[:_MAX_TBL])
+                    plot_refs['_data_col_filters'] = {
+                        cn: '' for cn in
+                        ['theta','phi','gtot','grhcp','glhcp','ar','plf','eirp']}
+
+                    def _apply_data_col_filter():
+                        src = plot_refs.get('_all_data_rows', [])
+                        result = src
+                        for cn, fv in plot_refs['_data_col_filters'].items():
+                            if fv:
+                                result = [r for r in result
+                                          if fv in str(r.get(cn, '')).lower()]
+                        tbl_data.rows = result
                         tbl_data.update()
-                    with tbl_data.add_slot('top'):
-                        with ui.row().classes('w-full items-center gap-1').style(
-                                'padding:2px 6px'):
-                            ui.icon('search').classes('text-grey-5').style('font-size:1rem')
-                            ui.input(placeholder='Filter rows…').props(
-                                'dense borderless clearable'
-                            ).classes('flex-1').on(
-                                'update:model-value',
-                                lambda e: _filter_data(e.args))
+
+                    _DATA_HDR = {
+                        'theta': 'θ (°)', 'phi': 'φ (°)',
+                        'gtot': 'G_tot', 'grhcp': 'G_RHCP',
+                        'glhcp': 'G_LHCP', 'ar': 'AR (dB)',
+                        'plf': 'PLF (dB)', 'eirp': 'EIRP'}
+                    for _cn, _cl in _DATA_HDR.items():
+                        tbl_data.add_slot(f'header-cell-{_cn}', f'''
+                            <q-th :props="props"
+                                  style="padding:2px 6px; vertical-align:top">
+                              <div style="font-weight:600;font-size:0.78rem;
+                                          white-space:nowrap;line-height:1.4"
+                                   class="cursor-pointer"
+                                   @click="props.col.sortable && props.sort(props.col)">
+                                {_cl}
+                                <q-icon v-if="props.col.sorted"
+                                        :name="props.col.descending
+                                               ? \'arrow_downward\' : \'arrow_upward\'"
+                                        style="font-size:0.75rem;color:#58a6ff"/>
+                              </div>
+                              <q-input dense borderless clearable
+                                       placeholder="▽"
+                                       input-style="font-size:0.7rem"
+                                       style="min-width:0;margin-top:1px"
+                                       @update:model-value=
+                                         "$emit(\'datacol-{_cn}\', $event)" />
+                            </q-th>''')
+                        tbl_data.on(f'datacol-{_cn}',
+                                    lambda e, c=_cn: (
+                                        plot_refs['_data_col_filters'].update(
+                                            {c: str(e.args or '').strip().lower()}),
+                                        _apply_data_col_filter()))
 
             # Dummy table for backward compat (tbl_out.rows still updated in callback)
             tbl_out = ui.table(columns=[], rows=[]).props('dense').style('display:none')
@@ -643,10 +696,9 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         fb = f'   FBR={R.fbr_dB:.1f} dB' if R.fbr_dB else ''
         lbl_hpbw.set_text(f'HPBW  E:{he}  H:{hh}{fb}')
 
-        n   = len(P.theta)
-        _MAX_TBL = 2000  # cap rows to avoid browser crash on large patterns
+        n = len(P.theta)
 
-        # ── Input data table ───────────────────────────────────────────────
+        # ── Input data table — all rows, no cap ────────────────────────────
         Gth = 20 * np.log10(np.abs(P.Eth) + 1e-30)
         Gph = 20 * np.log10(np.abs(P.Eph) + 1e-30)
         pth = np.angle(P.Eth, deg=True)
@@ -659,14 +711,12 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_in_rows'] = all_in
-        tbl_in.rows = all_in[:_MAX_TBL]
-        if n > _MAX_TBL:
-            tbl_in.rows.append(dict(
-                row_num='…', theta=f'…  ({n} total, showing {_MAX_TBL})',
-                phi='', gth='', gph='', pth='', pph=''))
+        plot_refs['_in_col_filters'] = {
+            cn: '' for cn in ['theta','phi','gth','gph','pth','pph']}
+        tbl_in.rows = all_in
         tbl_in.update()
 
-        # ── Output data table ──────────────────────────────────────────────
+        # ── Output data table — all rows, no cap ───────────────────────────
         all_data = [
             dict(row_num=str(i + 1),
                  theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
@@ -679,11 +729,10 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_data_rows'] = all_data
-        tbl_data.rows = all_data[:_MAX_TBL]
-        if n > _MAX_TBL:
-            tbl_data.rows.append(dict(
-                row_num='…', theta=f'…  ({n} total, showing {_MAX_TBL})',
-                phi='', gtot='', grhcp='', glhcp='', ar='', plf='', eirp=''))
+        plot_refs['_data_col_filters'] = {
+            cn: '' for cn in
+            ['theta','phi','gtot','grhcp','glhcp','ar','plf','eirp']}
+        tbl_data.rows = all_data
         tbl_data.update()
 
         # ── Output metrics table ──────────────────────────────────────────
@@ -724,11 +773,11 @@ def _update_single_plot(plot_refs, comp_dd, plot_dd, cut_type, cut_val,
                 cmin_inp.set_value(cmin_ar)
                 cmax_inp.set_value(cmax_ar)
                 plot_refs['ar_updating'] = False
-            cmin = float(cmin_inp.value)
-            cmax = float(cmax_inp.value)
+            cmin = float(cmin_inp.value or -30)
+            cmax = float(cmax_inp.value or  30)
         else:
-            cmin = float(cmin_inp.value)
-            cmax = float(cmax_inp.value)
+            cmin = float(cmin_inp.value if cmin_inp.value is not None else -50)
+            cmax = float(cmax_inp.value if cmax_inp.value is not None else   0)
         plot_refs['last_comp'] = comp_dd.value
 
         fig = _render_plot(
@@ -857,57 +906,63 @@ def _build_batch_tab():
                 refs['lbl_status'].set_text(f'{ok}/{total} processed — click Export CSV to download')
                 _notify(f'Batch complete: {ok}/{total} OK')
 
-            def _export_batch_csv():
-                import zipfile, io
-                entries = [e for e in _state['batch_entries'] if e.get('ok')]
-                if not entries: _notify_err('Run batch processing first.'); return
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                    for e in entries:
-                        R = e['R']
-                        rows = ['theta_deg,phi_deg,G_total_dBi,G_RHCP_dBic,'
-                                'G_LHCP_dBic,AR_dB,PLF_dB,EIRP_dBW']
-                        for i in range(len(R.theta)):
-                            rows.append(
-                                f'{R.theta[i]:.4f},{R.phi[i]:.4f},'
-                                f'{R.G_total_dB[i]:.4f},{R.G_RHCP_dB[i]:.4f},'
-                                f'{R.G_LHCP_dB[i]:.4f},{R.AR_dB[i]:.4f},'
-                                f'{R.PLF_dB[i]:.4f},{R.EIRP_dBW[i]:.4f}')
-                        safe_name = e['name'].rsplit('.', 1)[0] + '_processed.csv'
-                        zf.writestr(safe_name, '\n'.join(rows))
+            async def _export_batch_csv():
+                import zipfile, io as _bio
+                try:
+                    entries = [e for e in _state['batch_entries'] if e.get('ok')]
+                    if not entries:
+                        _notify_err('Run batch processing first.')
+                        return
+                    buf = _bio.BytesIO()
+                    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        for e in entries:
+                            R = e['R']
+                            rows = ['theta_deg,phi_deg,G_total_dBi,G_RHCP_dBic,'
+                                    'G_LHCP_dBic,AR_dB,PLF_dB,EIRP_dBW']
+                            for i in range(len(R.theta)):
+                                rows.append(
+                                    f'{R.theta[i]:.4f},{R.phi[i]:.4f},'
+                                    f'{R.G_total_dB[i]:.4f},{R.G_RHCP_dB[i]:.4f},'
+                                    f'{R.G_LHCP_dB[i]:.4f},{R.AR_dB[i]:.4f},'
+                                    f'{R.PLF_dB[i]:.4f},{R.EIRP_dBW[i]:.4f}')
+                            safe_name = e['name'].rsplit('.', 1)[0] + '_processed.csv'
+                            zf.writestr(safe_name, '\n'.join(rows))
 
-                    # Coverage CSVs — one file per mode, rows=thresholds cols=patterns
-                    cov_entries = [e for e in entries if 'cov_thr' in e]
-                    if cov_entries:
-                        thr = cov_entries[0]['cov_thr']
-                        # Spherical coverage table
-                        sph_ents = [e for e in cov_entries if 'cov_sph' in e]
-                        if sph_ents:
-                            hdr = 'threshold_dBi,' + ','.join(
-                                e['name'] + '_sph_%' for e in sph_ents)
-                            sph_rows = [hdr]
-                            for i, t in enumerate(thr):
-                                vals = ','.join(
-                                    f'{e["cov_sph"][i]*100:.2f}' for e in sph_ents)
-                                sph_rows.append(f'{t:.2f},{vals}')
-                            zf.writestr('batch_spherical_coverage.csv',
-                                        '\n'.join(sph_rows))
-                        # Conical coverage table
-                        con_ents = [e for e in cov_entries if 'cov_con' in e]
-                        if con_ents:
-                            hdr = 'threshold_dBi,' + ','.join(
-                                e['name'] + '_con_%' for e in con_ents)
-                            con_rows = [hdr]
-                            for i, t in enumerate(thr):
-                                vals = ','.join(
-                                    f'{e["cov_con"][i]*100:.2f}' for e in con_ents)
-                                con_rows.append(f'{t:.2f},{vals}')
-                            zf.writestr('batch_conical_coverage.csv',
-                                        '\n'.join(con_rows))
+                        # Coverage CSVs — rows=thresholds, cols=patterns
+                        cov_entries = [e for e in entries if 'cov_thr' in e]
+                        if cov_entries:
+                            thr = cov_entries[0]['cov_thr']
+                            sph_ents = [e for e in cov_entries if 'cov_sph' in e]
+                            if sph_ents:
+                                hdr = 'threshold_dBi,' + ','.join(
+                                    e['name'] + '_sph_%' for e in sph_ents)
+                                sph_rows = [hdr]
+                                for i, t in enumerate(thr):
+                                    vals = ','.join(
+                                        f'{e["cov_sph"][i]*100:.2f}'
+                                        for e in sph_ents)
+                                    sph_rows.append(f'{t:.2f},{vals}')
+                                zf.writestr('batch_spherical_coverage.csv',
+                                            '\n'.join(sph_rows))
+                            con_ents = [e for e in cov_entries if 'cov_con' in e]
+                            if con_ents:
+                                hdr = 'threshold_dBi,' + ','.join(
+                                    e['name'] + '_con_%' for e in con_ents)
+                                con_rows = [hdr]
+                                for i, t in enumerate(thr):
+                                    vals = ','.join(
+                                        f'{e["cov_con"][i]*100:.2f}'
+                                        for e in con_ents)
+                                    con_rows.append(f'{t:.2f},{vals}')
+                                zf.writestr('batch_conical_coverage.csv',
+                                            '\n'.join(con_rows))
 
-                buf.seek(0)
-                ui.download(buf.read(), 'batch_patterns.zip')
-                _notify(f'Downloading {len(entries)} pattern CSV(s) as zip')
+                    buf.seek(0)
+                    ui.download(buf.read(), 'batch_patterns.zip')
+                    _notify(f'Downloading {len(entries)} pattern CSV(s) as zip')
+                except Exception as ex:
+                    traceback.print_exc()
+                    _notify_err(f'Export error: {ex}')
 
             def _clear_batch():
                 _state['batch_entries'].clear()
