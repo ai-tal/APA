@@ -2,7 +2,7 @@
 
 ## Overview
 
-A web-based code browser for the **Antenna Pattern Analyzer (APA)** MATLAB App Designer project. Since MATLAB cannot run natively in Replit, this app provides a clean web interface to browse and read all three versions of the MATLAB source code.
+A **NiceGUI**-based web/desktop code browser for the **Antenna Pattern Analyzer (APA)** MATLAB App Designer project. Since MATLAB cannot run natively in Replit, this app provides a rich, interactive interface to browse all three versions of the MATLAB source code.
 
 ## Project Structure
 
@@ -20,16 +20,14 @@ A web-based code browser for the **Antenna Pattern Analyzer (APA)** MATLAB App D
 │   └── lib/
 │       ├── +io/         # Extended loaders (HFSS, CST, FEKO, XGTD, GRASP)
 │       └── +proc/       # Extended processing (regional masks, solid angle weights)
-└── web/                 # Flask web code browser
-    ├── app.py           # Flask server (serves on port 5000)
-    └── templates/
-        └── index.html   # Single-page code browser UI
+└── web/                 # NiceGUI application
+    └── app.py           # Main app — NiceGUI server on port 5000
 ```
 
 ## Technology Stack
 
-- **Backend**: Python 3, Flask
-- **Frontend**: Vanilla HTML/CSS/JS (single template, no framework)
+- **Framework**: NiceGUI (Python, FastAPI/Starlette + Vue/Quasar under the hood)
+- **UI**: Quasar components via NiceGUI (dark theme, tabs, tree, code viewer)
 - **Port**: 5000
 
 ## Running
@@ -38,9 +36,19 @@ A web-based code browser for the **Antenna Pattern Analyzer (APA)** MATLAB App D
 python web/app.py
 ```
 
+Runs as a web app on `http://0.0.0.0:5000`. Can also be launched as a native desktop app by changing `ui.run(native=True)`.
+
+## Features
+
+- **3-version tabs**: APA v1, v2, v3 with live tree switching
+- **File tree**: NiceGUI `ui.tree()` with namespace badges (I/O, Plot, Proc)
+- **Code viewer**: Syntax-highlighted MATLAB via `ui.code(language='matlab')`
+- **Copy button**: Copies full file content to clipboard
+- **Version info bar**: Description and file count per version
+
 ## What the MATLAB App Does
 
-The APA app loads antenna far-field radiation patterns from simulation tools (HFSS, GRASP, CST, FEKO, XGTD) in formats like `.ffd`, `.ffe`, `.ffs`, `.fz`, `.out` and provides:
+Loads antenna far-field radiation patterns from simulation tools (HFSS, GRASP, CST, FEKO, XGTD) in formats like `.ffd`, `.ffe`, `.ffs`, `.fz`, `.out` and provides:
 
 - Gain, EIRP, axial ratio, PLF, HPBW calculations
 - Pattern rotation and combination
@@ -49,4 +57,4 @@ The APA app loads antenna far-field radiation patterns from simulation tools (HF
 
 ## Deployment
 
-Configured as `autoscale` static-style with gunicorn for production.
+Configured as `autoscale` with `python web/app.py`.
