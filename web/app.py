@@ -25,6 +25,18 @@ from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
 # ── Download store: large files served via HTTP endpoint, not WebSocket ───────
 _DL_STORE: dict[str, bytes] = {}
 
+# ── Row store: table rows served via HTTP (not Socket.IO) to avoid crashes ───
+# Socket.IO sending 65K rows (~20 MB) as a single packet crashes the browser.
+# Instead we send a tiny 200-row preview via Socket.IO for instant display,
+# then fire a fetch() from the browser to load all rows over plain HTTP.
+_ROW_STORE: dict[str, list] = {}
+
+@app.get('/api/rows/{key}')
+async def _rows_endpoint(key: str):
+    from fastapi.responses import JSONResponse
+    rows = _ROW_STORE.pop(key, [])
+    return JSONResponse(content=rows)
+
 @app.get('/api/dl/{token}')
 async def _dl_endpoint(token: str):
     data = _DL_STORE.pop(token, None)
@@ -488,6 +500,33 @@ def _build_single_tab():
                 cb_peak = ui.checkbox('Peak', value=True).props('color=blue')
                 cb_hpbw = ui.checkbox('HPBW', value=False).props('color=yellow')
 
+                def _export_cut():
+                    R = _state.get('R_single')
+                    if R is None:
+                        _notify_err('No pattern loaded'); return
+                    pm  = plot_refs.get('plane_mode')
+                    ct  = plot_refs.get('cut_type')
+                    cv  = plot_refs.get('cut_val')
+                    pm_val = pm.value  if pm  else 'Custom'
+                    ct_val = ct.value  if ct  else 'Phi Cut'
+                    cv_val = cv.value  if cv  else 0.0
+                    try:
+                        data, fname = _build_cut_csv(R, pm_val, ct_val, cv_val)
+                        tok = secrets.token_hex(16)
+                        _DL_STORE[tok] = data
+                        ui.run_javascript(
+                            f"const a=document.createElement('a');"
+                            f"a.href='/api/dl/{tok}';"
+                            f"a.download='{fname}';"
+                            f"document.body.appendChild(a);a.click();a.remove();")
+                        _notify(f'Downloading {fname}')
+                    except Exception as ex:
+                        _notify_err(f'Export error: {ex}')
+
+                btn_export_cut = ui.button('Export Cut', on_click=_export_cut,
+                                           icon='download').props(
+                    'flat color=teal size=sm')
+
                 def _update_controls_visibility():
                     is_cut    = plot_dd.value in CUT_PLOT_TYPES
                     is_1d_cut = plot_dd.value in ('Polar Cut', 'Rect Cut')
@@ -498,6 +537,7 @@ def _build_single_tab():
                     cut_val.set_visibility(is_cut and is_custom)
                     cut_comp.set_visibility(is_1d_cut)
                     cb_hpbw.set_visibility(is_1d_cut)
+                    btn_export_cut.set_visibility(is_cut)
 
                 # Initial visibility (Contour = no cut controls)
                 plane_mode.set_visibility(False)
@@ -506,6 +546,7 @@ def _build_single_tab():
                 cut_val.set_visibility(False)
                 cut_comp.set_visibility(False)
                 cb_hpbw.set_visibility(False)
+                btn_export_cut.set_visibility(False)
 
                 def _refresh_plot():
                     if plot_refs.get('ar_updating'): return
@@ -523,6 +564,7 @@ def _build_single_tab():
                 main=main_plot, comp_dd=comp_dd, plot_dd=plot_dd,
                 plane_mode=plane_mode, lbl_plane_info=lbl_plane_info,
                 cut_type=cut_type, cut_val=cut_val, cut_comp=cut_comp,
+                btn_export_cut=btn_export_cut,
                 cmin_inp=cmin_inp, cmax_inp=cmax_inp,
                 cb_peak=cb_peak, cb_hpbw=cb_hpbw,
                 fmt_dd=fmt_dd,
@@ -668,13 +710,6 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_in_rows'] = all_in
-        tbl_in.rows = all_in
-        tbl_in.update()
-        _lbl_in = plot_refs.get('lbl_in_count')
-        if _lbl_in is not None:
-            _lbl_in.set_text(f'{n:,} rows')
-
-        # ── Output data table ───────────────────────────────────────────────
         all_data = [
             dict(row_num=str(i + 1),
                  theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
@@ -687,8 +722,38 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_data_rows'] = all_data
-        tbl_data.rows = all_data
-        tbl_data.update()
+
+        # ── Send preview rows via Socket.IO; load all via HTTP to avoid crash ─
+        # Sending 65K rows (~20 MB) in one Socket.IO packet crashes the browser.
+        # Solution: push a tiny preview instantly, then fetch all via REST.
+        _PREVIEW = 200
+        tbl_in.rows   = all_in[:_PREVIEW];   tbl_in.update()
+        tbl_data.rows = all_data[:_PREVIEW];  tbl_data.update()
+
+        key_in   = secrets.token_hex(12)
+        key_data = secrets.token_hex(12)
+        _ROW_STORE[key_in]   = all_in
+        _ROW_STORE[key_data] = all_data
+        tbl_in_id   = tbl_in.id
+        tbl_data_id = tbl_data.id
+
+        ui.run_javascript(f"""
+(async () => {{
+  const {{ markRaw }} = Vue;
+  const [rowsIn, rowsData] = await Promise.all([
+    fetch('/api/rows/{key_in}').then(r => r.json()),
+    fetch('/api/rows/{key_data}').then(r => r.json()),
+  ]);
+  const elIn   = getElement({tbl_in_id});
+  const elData = getElement({tbl_data_id});
+  if (elIn)   elIn.rows   = markRaw(rowsIn);
+  if (elData) elData.rows = markRaw(rowsData);
+}})();
+""")
+
+        _lbl_in = plot_refs.get('lbl_in_count')
+        if _lbl_in is not None:
+            _lbl_in.set_text(f'{n:,} rows')
         _lbl_data = plot_refs.get('lbl_data_count')
         if _lbl_data is not None:
             _lbl_data.set_text(f'{n:,} rows')
@@ -709,6 +774,24 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
     except Exception as ex:
         traceback.print_exc()
         _notify_err(f'Processing error: {ex}')
+
+
+def _build_cut_csv(R, plane_mode_val, cut_type_val, cut_val_val):
+    """Return (csv_bytes, filename) for the current 1-D cut."""
+    eff_type, eff_val = _eff_cut_params(R, plane_mode_val, cut_type_val, cut_val_val)
+    angles, G_tot, G_rhcp, G_lhcp = get_cut(R, eff_type, eff_val)
+    if eff_type == 'Theta Cut':
+        angle_hdr = 'theta_deg'
+        fixed_hdr = f'phi={eff_val:.1f}deg'
+    else:
+        angle_hdr = 'phi_deg'
+        fixed_hdr = f'theta={eff_val:.1f}deg'
+    plane_tag = plane_mode_val.replace(' ', '_').replace('-', '')
+    filename  = f'cut_{plane_tag}_{fixed_hdr}.csv'
+    lines = [f'{angle_hdr},Gtot_dBi,GRHCP_dBic,GLHCP_dBic']
+    for a, gt, gr, gl in zip(angles, G_tot, G_rhcp, G_lhcp):
+        lines.append(f'{a:.2f},{gt:.3f},{gr:.3f},{gl:.3f}')
+    return '\n'.join(lines).encode(), filename
 
 
 def _eff_cut_params(R, plane_mode_val, cut_type_val, cut_val_val):
