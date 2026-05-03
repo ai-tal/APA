@@ -146,10 +146,11 @@ def _xyz_axes(r_scale: float, colorX='#ff4444', colorY='#44ff44', colorZ='#4fc3f
 # Contour (Heatmap) — phi (x) vs theta (y)
 # ─────────────────────────────────────────────────────────────────────────────
 def _ar_clim(grid):
-    """Auto Cmin/Cmax for Axial Ratio: always starts at 0, ceiling at next 5."""
+    """Auto Cmin/Cmax for Axial Ratio: symmetric about 0 so White = 0 dB (perfect circular).
+    |Cmin| == Cmax, both rounded to next multiple of 5."""
     raw_max = float(np.nanmax(grid))
     cmax = float(np.ceil(max(raw_max, 1.0) / 5) * 5)
-    return 0.0, cmax
+    return -cmax, cmax
 
 
 def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',

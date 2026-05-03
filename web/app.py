@@ -13,6 +13,29 @@ from src.processing import (process_pattern, combine_patterns, compute_coverage,
                              rotation_matrix_from_vectors, apply_rotation,
                              rotate_processed_pattern,
                              get_component_grid, get_cut, detect_boresight)
+
+
+def _rot_status_str(R: np.ndarray) -> str:
+    """Format a 3×3 SO(3) matrix as a human-readable rotation status string."""
+    if np.allclose(R, np.eye(3), atol=1e-9):
+        return 'No rotation applied (identity)'
+    cos_ang = np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)
+    angle = float(np.degrees(np.arccos(cos_ang)))
+    # Rodrigues axis from skew-symmetric part
+    sin_ang = np.sqrt(max(0.0, 1.0 - cos_ang ** 2))
+    if sin_ang > 1e-6:
+        ax = np.array([R[2, 1] - R[1, 2],
+                       R[0, 2] - R[2, 0],
+                       R[1, 0] - R[0, 1]]) / (2.0 * sin_ang)
+        return (f'Total rotation: {angle:.1f}°  '
+                f'axis [{ax[0]:.2f}, {ax[1]:.2f}, {ax[2]:.2f}]')
+    # 180° case — axis from largest diagonal
+    diag = np.diag(R)
+    idx = int(np.argmax(diag))
+    ax = np.zeros(3); ax[idx] = 1.0
+    return f'Total rotation: 180.0°  axis [{ax[0]:.0f}, {ax[1]:.0f}, {ax[2]:.0f}]'
+
+
 from src.plotting import (plot_contour, plot_polar_cut, plot_rect_cut,
                            plot_3d_pattern, plot_3d_sphere,
                            plot_circular, plot_filled_polar,
@@ -372,6 +395,9 @@ def _build_single_tab():
                         src_ori.set_value('Custom...')
                         dir_str = f'θ={R.max_gain_dir[0]:.1f}° φ={R.max_gain_dir[1]:.1f}°'
                         lbl_peak.set_text(f'Peak: {R.max_gain_dB:.2f} dBi  @  {dir_str}')
+                        if 'lbl_rot_info' in plot_refs:
+                            plot_refs['lbl_rot_info'].set_text(
+                                _rot_status_str(_state['rot_matrix']))
                         _update_single_plot(
                             plot_refs,
                             plot_refs['comp_dd'], plot_refs['plot_dd'],
@@ -403,6 +429,9 @@ def _build_single_tab():
                         coords = _ORI_PRESETS.get(label, (0.0, 0.0))
                         src_th.set_value(coords[0])
                         src_ph.set_value(coords[1])
+                    if 'lbl_rot_info' in plot_refs:
+                        plot_refs['lbl_rot_info'].set_text(
+                            _rot_status_str(np.eye(3)))
                     _notify('Rotation reset to original.')
 
                 with ui.row().classes('w-full gap-1'):
@@ -412,6 +441,11 @@ def _build_single_tab():
                         'flat color=orange').classes('flex-1')
                     ui.button('Reset',  on_click=_reset_rot, icon='undo').props(
                         'flat color=grey').classes('flex-1')
+
+                lbl_rot_info = ui.label(_rot_status_str(np.eye(3))).classes(
+                    'text-caption text-grey-7 w-full').style(
+                    'font-family:monospace; font-size:0.72rem; padding-top:2px')
+                plot_refs['lbl_rot_info'] = lbl_rot_info
 
             with _card('Export'):
                 def _export_csv():
@@ -580,7 +614,7 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             R = rotate_processed_pattern(R, rot)
         _state['R_single'] = R
 
-        # Auto-detect boresight and update source spinners
+        # Auto-detect boresight and update source spinners; reset tracker label
         if 'src_ori' in plot_refs:
             d = detect_boresight(R)
             label = _BORESIGHT_TO_ORI.get(d, '+Z (Overhead)')
@@ -588,6 +622,9 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             plot_refs['src_ori'].set_value(label)
             plot_refs['src_th'].set_value(coords[0])
             plot_refs['src_ph'].set_value(coords[1])
+        if 'lbl_rot_info' in plot_refs:
+            plot_refs['lbl_rot_info'].set_text(
+                _rot_status_str(_state['rot_matrix']))
 
         cmin, cmax = auto_clim(R.max_gain_dB)
         plot_refs['cmin_inp'].set_value(cmin)
@@ -603,9 +640,10 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
         lbl_hpbw.set_text(f'HPBW  E:{he}  H:{hh}{fb}')
 
         n   = len(P.theta)
-        idx = np.arange(n)
+        _MAX_TBL = 2000  # cap rows to avoid browser crash on large patterns
+        idx = np.arange(min(n, _MAX_TBL))
 
-        # ── Input data table — ALL rows ────────────────────────────────────
+        # ── Input data table ───────────────────────────────────────────────
         Gth = 20 * np.log10(np.abs(P.Eth) + 1e-30)
         Gph = 20 * np.log10(np.abs(P.Eph) + 1e-30)
         pth = np.angle(P.Eth, deg=True)
@@ -617,9 +655,13 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
                  pth=f'{pth[i]:.2f}', pph=f'{pph[i]:.2f}')
             for i in idx
         ]
+        if n > _MAX_TBL:
+            tbl_in.rows.append(dict(
+                row_num='…', theta=f'…  ({n} total, showing {_MAX_TBL})',
+                phi='', gth='', gph='', pth='', pph=''))
         tbl_in.update()
 
-        # ── Output data table — ALL rows ────────────────────────────────────
+        # ── Output data table ──────────────────────────────────────────────
         tbl_data.rows = [
             dict(row_num=str(i + 1),
                  theta=f'{R.theta[i]:.2f}', phi=f'{R.phi[i]:.2f}',
@@ -631,6 +673,10 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
                  eirp=f'{R.EIRP_dBW[i]:.3f}')
             for i in idx
         ]
+        if n > _MAX_TBL:
+            tbl_data.rows.append(dict(
+                row_num='…', theta=f'…  ({n} total, showing {_MAX_TBL})',
+                phi='', gtot='', grhcp='', glhcp='', ar='', plf='', eirp=''))
         tbl_data.update()
 
         # ── Output metrics table ──────────────────────────────────────────
@@ -951,7 +997,7 @@ def _build_coverage_tab():
                 ui.separator()
                 with ui.grid(columns=3).classes('w-full gap-1'):
                     thr_min  = ui.number('Min (dB)',  value=-40.0, format='%.0f').props('dense outlined')
-                    thr_max  = ui.number('Max (dB)',  value=0.0,   format='%.0f').props('dense outlined')
+                    thr_max  = ui.number('Max (dB)',  value=10.0,  format='%.0f').props('dense outlined')
                     thr_step = ui.number('Step (dB)', value=1.0,   format='%.1f').props('dense outlined')
 
             def _run_coverage():
