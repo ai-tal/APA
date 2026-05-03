@@ -4,6 +4,7 @@ Antenna Pattern Analyzer (APA) — unified Python/NiceGUI implementation.
 import sys, os, traceback
 sys.path.insert(0, os.path.dirname(__file__))
 
+import asyncio
 import numpy as np
 from nicegui import ui, app
 
@@ -162,17 +163,23 @@ function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
     _dark = ui.dark_mode(value=True)
     _theme = {'dark': True}
 
-    with ui.header(elevated=True).style('padding:6px 18px'):
-        ui.label('📡 Antenna Pattern Analyzer').style(
-            'font-size:1.3rem; font-weight:700; letter-spacing:1px').classes('text-primary')
-        ui.space()
+    with ui.header(elevated=True).classes('items-center').style('padding:4px 12px; gap:0'):
+        ui.label('📡 APA').style(
+            'font-size:1.1rem; font-weight:700; letter-spacing:1px; '
+            'flex-shrink:0; margin-right:8px').classes('text-white')
+
+        with ui.tabs().props('dense indicator-color=white align=center').classes('flex-1') as tabs:
+            t_single   = ui.tab('Single',   icon='tune')
+            t_batch    = ui.tab('Batch',    icon='folder_open')
+            t_coverage = ui.tab('Coverage', icon='radar')
+            t_combine  = ui.tab('Combine',  icon='merge')
 
         def _toggle_theme():
             _theme['dark'] = not _theme['dark']
             if _theme['dark']:
                 _dark.enable()
                 _theme_icon.set_content(_MOON_SVG)
-                _theme_btn.style('color:#8b949e')
+                _theme_btn.style('color:white')
                 ui.run_javascript('_apaRelayoutPlotly("#16213e","#1a1a2e","#e0e0e0")')
             else:
                 _dark.disable()
@@ -181,14 +188,9 @@ function _apaRelayoutPlotly(bgPaper, bgPlot, fontColor) {
                 ui.run_javascript('_apaRelayoutPlotly("#f5f7fa","#f0f2f5","#24292f")')
 
         with ui.button(on_click=_toggle_theme).props('flat round dense').style(
-                'color:#8b949e; width:34px; height:34px; padding:0; min-width:0') as _theme_btn:
+                'color:white; width:34px; height:34px; padding:0; min-width:0; '
+                'flex-shrink:0; margin-left:8px') as _theme_btn:
             _theme_icon = ui.html(_MOON_SVG)
-
-    with ui.tabs().props('dense indicator-color=blue').classes('w-full') as tabs:
-        t_single   = ui.tab('Single',   icon='tune')
-        t_batch    = ui.tab('Batch',    icon='folder_open')
-        t_coverage = ui.tab('Coverage', icon='radar')
-        t_combine  = ui.tab('Combine',  icon='merge')
 
     _ui_tabs['tabs']       = tabs
     _ui_tabs['t_single']   = t_single
@@ -625,16 +627,19 @@ def _build_batch_tab():
                     b_rw   = ui.number('Rw (dB)',         value=0.0).props('dense outlined')
                     b_dist = ui.number('Distance (m)',    value=1.0).props('dense outlined')
 
-            def _run_batch():
+            async def _run_batch():
                 entries = _state['batch_entries']
                 if not entries: _notify_err('Upload files first.'); return
                 params = dict(Pt_dBW=b_pt.value, Loss_dB=b_loss.value,
                               Rw_dB=b_rw.value, dist_m=b_dist.value)
                 ok = 0
+                loop = asyncio.get_event_loop()
                 for ent in entries:
                     if ent.get('P') and not ent.get('R'):
                         try:
-                            ent['R'] = process_pattern(ent['P'], params)
+                            P, par = ent['P'], params
+                            ent['R'] = await loop.run_in_executor(
+                                None, lambda p=P, pa=par: process_pattern(p, pa))
                             ent['ok'] = True; ok += 1
                         except Exception as ex:
                             ent['ok'] = False; ent['err'] = str(ex)
@@ -1065,7 +1070,7 @@ def _build_combine_tab():
             ).style('color:#8b949e; font-size:0.82rem; padding:4px')
 
             with _card('Combined Pattern'):
-                with ui.row().classes('w-full gap-2 items-center'):
+                with ui.row().classes('w-full gap-2 items-center').style('flex-wrap:wrap'):
                     cp_type = ui.select(
                         ['Contour', 'Circular', '3D Pattern', '3D Spherical',
                          'Polar Cut', 'Rect Cut'],
@@ -1073,11 +1078,17 @@ def _build_combine_tab():
                         'dense outlined').style('min-width:140px')
                     cp_comp = ui.select(COMPONENTS[:3], value='Total Gain', label='Comp').props(
                         'dense outlined').style('min-width:128px')
+                    cp_cmin = ui.number('Cmin (dB)', value=-50.0, format='%.0f').props(
+                        'dense outlined').style('width:100px')
+                    cp_cmax = ui.number('Cmax (dB)', value=0.0, format='%.0f').props(
+                        'dense outlined').style('width:100px')
 
                     def _refresh_cmb_plot():
                         R = _state.get('cmb_result')
                         if R is None: return
-                        cmin, cmax = auto_clim(R.max_gain_dB)
+                        c0, c1 = auto_clim(R.max_gain_dB)
+                        cmin = cp_cmin.value if cp_cmin.value is not None else c0
+                        cmax = cp_cmax.value if cp_cmax.value is not None else c1
                         try:
                             fig = _render_plot(
                                 R, plot_type=cp_type.value, component=cp_comp.value,
@@ -1089,6 +1100,8 @@ def _build_combine_tab():
 
                     cp_type.on('update:model-value', lambda _: _refresh_cmb_plot())
                     cp_comp.on('update:model-value', lambda _: _refresh_cmb_plot())
+                    cp_cmin.on('update:model-value', lambda _: _refresh_cmb_plot())
+                    cp_cmax.on('update:model-value', lambda _: _refresh_cmb_plot())
                     ui.button('Refresh', on_click=_refresh_cmb_plot, icon='refresh').props(
                         'flat color=blue size=sm')
 
@@ -1154,6 +1167,7 @@ def _build_combine_tab():
                     [p['R'] for p in pats], method=method_key, masks=masks)
                 _state['cmb_result'] = R_comb
                 cmin, cmax = auto_clim(R_comb.max_gain_dB)
+                cp_cmin.set_value(cmin); cp_cmax.set_value(cmax)
                 cmb_plot_el.update_figure(plot_contour(R_comb, 'Total Gain', cmin, cmax))
                 lbl_cmb_result.set_text(
                     f'Combined {len(pats)} patterns  |  {cmb_method.value}  |  '

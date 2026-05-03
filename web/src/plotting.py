@@ -30,6 +30,21 @@ _LAYOUT_BASE = dict(
 )
 
 
+def _ar_colorscale(N: int = 64) -> list:
+    """OriginPro-style Red-White-Blue thermometer colorscale for Axial Ratio.
+    Replicates MATLAB:
+      [N*ones(1,N), N:-1:0; 0:N-1, N:-1:0; 0:N, N*ones(1,N)].' / N
+    Red(1,0,0) at index 0 → White(1,1,1) at midpoint → Blue(0,0,1) at end.
+    """
+    R_v = np.concatenate([np.full(N, N), np.arange(N, -1, -1)]).astype(float) / N
+    G_v = np.concatenate([np.arange(N),  np.arange(N, -1, -1)]).astype(float) / N
+    B_v = np.concatenate([np.arange(N + 1), np.full(N, N)]).astype(float)    / N
+    pos = np.linspace(0.0, 1.0, 2 * N + 1)
+    return [[float(pos[i]),
+             f'rgb({int(R_v[i]*255)},{int(G_v[i]*255)},{int(B_v[i]*255)})']
+            for i in range(2 * N + 1)]
+
+
 def _axis_style(**kw):
     return dict(gridcolor=_GRID_COLOR, zerolinecolor=_GRID_COLOR, showgrid=True, **kw)
 
@@ -123,9 +138,10 @@ def plot_contour(R: ProcessedPattern, component: str = 'Total Gain',
 
     pv, gw = _wrap_phi(R, grid)
 
+    cs = _ar_colorscale() if component == 'Axial Ratio' else _COLORSCALE
     fig = go.Figure(go.Heatmap(
         x=pv, y=R.theta_vec, z=gw,
-        zmin=cmin, zmax=cmax, colorscale=_COLORSCALE,
+        zmin=cmin, zmax=cmax, colorscale=cs,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         hovertemplate='φ=%{x:.1f}°  θ=%{y:.1f}°  ' + label + '=%{z:.2f}<extra></extra>',
     ))
@@ -339,22 +355,22 @@ def plot_filled_polar(R: ProcessedPattern, component: str = 'Total Gain',
     # dB value at each pixel = G(phi) for pixels inside the pattern boundary
     G_val = np.where(R_pix <= G_boundary, boundary_fn(A_pix) + cmin, np.nan)
 
-    # ── Jet colormap helper ──
-    def _jet_rgba(val, vmin, vmax):
-        """Return 'rgba(r,g,b,1)' jet color for scalar val in [vmin, vmax]."""
-        t = np.clip((val - vmin) / max(vmax - vmin, 1e-6), 0.0, 1.0)
-        r = np.clip(1.5 - np.abs(4.0*t - 3.0), 0.0, 1.0)
-        g = np.clip(1.5 - np.abs(4.0*t - 2.0), 0.0, 1.0)
-        b = np.clip(1.5 - np.abs(4.0*t - 1.0), 0.0, 1.0)
-        return np.stack([r, g, b], axis=-1)
-
-    # Build colorscale from jet (Plotly expects [[frac, 'rgb(...)'], ...])
-    n_cs = 64
-    t_arr = np.linspace(0, 1, n_cs)
-    cs_rgb = _jet_rgba(t_arr, 0.0, 1.0)
-    colorscale = [[float(t_arr[i]),
-                   f'rgb({int(cs_rgb[i,0]*255)},{int(cs_rgb[i,1]*255)},{int(cs_rgb[i,2]*255)})']
-                  for i in range(n_cs)]
+    # ── Colorscale: AR uses Red-White-Blue thermometer; others use Jet ──
+    if component == 'Axial Ratio':
+        colorscale = _ar_colorscale()
+    else:
+        def _jet_rgba(val, vmin, vmax):
+            t = np.clip((val - vmin) / max(vmax - vmin, 1e-6), 0.0, 1.0)
+            r = np.clip(1.5 - np.abs(4.0*t - 3.0), 0.0, 1.0)
+            g = np.clip(1.5 - np.abs(4.0*t - 2.0), 0.0, 1.0)
+            b = np.clip(1.5 - np.abs(4.0*t - 1.0), 0.0, 1.0)
+            return np.stack([r, g, b], axis=-1)
+        n_cs = 64
+        t_arr = np.linspace(0, 1, n_cs)
+        cs_rgb = _jet_rgba(t_arr, 0.0, 1.0)
+        colorscale = [[float(t_arr[i]),
+                       f'rgb({int(cs_rgb[i,0]*255)},{int(cs_rgb[i,1]*255)},{int(cs_rgb[i,2]*255)})']
+                      for i in range(n_cs)]
 
     fig = go.Figure()
 
@@ -453,10 +469,11 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
                     showspikes=False)
 
     fig = go.Figure()
+    cs3d = _ar_colorscale() if component == 'Axial Ratio' else _COLORSCALE
     fig.add_trace(go.Surface(
         x=X, y=Y, z=Z,
         surfacecolor=gw, cmin=cmin, cmax=cmax,
-        colorscale=_COLORSCALE,
+        colorscale=cs3d,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         customdata=cd,
         hovertemplate=(
@@ -501,11 +518,12 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
                     title='', showaxeslabels=False, showbackground=False,
                     showspikes=False)
 
+    cs_sph = _ar_colorscale() if component == 'Axial Ratio' else _COLORSCALE
     fig = go.Figure()
     fig.add_trace(go.Surface(
         x=X, y=Y, z=Z,
         surfacecolor=gw, cmin=cmin, cmax=cmax,
-        colorscale=_COLORSCALE,
+        colorscale=cs_sph,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         customdata=cd,
         hovertemplate=(
