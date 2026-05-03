@@ -571,6 +571,16 @@ def _build_single_tab():
             # Store count labels in plot_refs so _do_process_single can update them
 
 
+# ── Chunked table helper ───────────────────────────────────────────────────────
+_CHUNK = 1500   # rows per WebSocket message (~200 KB, well under the 1 MB limit)
+
+async def _fill_table_chunks(tbl, rows: list) -> None:
+    """Stream rows to a NiceGUI table in small chunks to stay under Socket.IO limit."""
+    for i in range(0, len(rows), _CHUNK):
+        tbl.add_rows(*rows[i:i + _CHUNK])
+        await asyncio.sleep(0)
+
+
 # ── Single-tab callbacks ──────────────────────────────────────────────────────
 
 async def _on_upload_single(e, lbl_status, plot_refs, tbl_in, tbl_data, tbl_out,
@@ -651,8 +661,9 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_in_rows'] = all_in
-        tbl_in.rows = all_in
-        tbl_in.update()
+        tbl_in.rows = []
+        tbl_in.update()   # clear (tiny message)
+        asyncio.ensure_future(_fill_table_chunks(tbl_in, all_in))
 
         # ── Output data table ───────────────────────────────────────────────
         all_data = [
@@ -667,8 +678,9 @@ def _do_process_single(plot_refs, tbl_in, tbl_data, tbl_out,
             for i in range(n)
         ]
         plot_refs['_all_data_rows'] = all_data
-        tbl_data.rows = all_data
-        tbl_data.update()
+        tbl_data.rows = []
+        tbl_data.update()   # clear (tiny message)
+        asyncio.ensure_future(_fill_table_chunks(tbl_data, all_data))
 
         # ── Output metrics table ──────────────────────────────────────────
         tbl_out.rows = [{'metric': r[0], 'value': r[1]} for r in R.table_rows]
