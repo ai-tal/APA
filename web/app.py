@@ -107,18 +107,55 @@ def _render_plot(R, plot_type, component, cut_type, cut_value, cmin, cmax,
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN PAGE
 # ══════════════════════════════════════════════════════════════════════════════
+_MOON_SVG = (
+    '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" '
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
+    '</svg>'
+)
+_SUN_SVG = (
+    '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" '
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="5"/>'
+    '<line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>'
+    '<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>'
+    '<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>'
+    '<line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>'
+    '<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>'
+    '<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
+    '</svg>'
+)
+
+
 @ui.page('/')
 def main_page():
     ui.query('body').style(
         'background:#0d1117; color:#e0e0e0; font-family:Roboto,sans-serif')
+
+    _dark = ui.dark_mode(value=True)
+    _theme = {'dark': True}
 
     with ui.header(elevated=True).style(
             'background:#161b22; border-bottom:1px solid #30363d; padding:6px 18px'):
         ui.label('📡 Antenna Pattern Analyzer').style(
             'font-size:1.3rem; font-weight:700; color:#58a6ff; letter-spacing:1px')
         ui.space()
-        ui.label('Dark/Light mode').style(
-            'font-size:0.72rem; color:#8b949e')
+
+        def _toggle_theme():
+            _theme['dark'] = not _theme['dark']
+            if _theme['dark']:
+                _dark.enable()
+                _theme_icon.set_content(_MOON_SVG)
+                _theme_btn.style('color:#8b949e')
+            else:
+                _dark.disable()
+                _theme_icon.set_content(_SUN_SVG)
+                _theme_btn.style('color:#ffd600')
+
+        with ui.button(on_click=_toggle_theme).props('flat round dense').style(
+                'color:#8b949e; border:1px solid #30363d; border-radius:50%; '
+                'width:34px; height:34px; padding:0; min-width:0') as _theme_btn:
+            _theme_icon = ui.html(_MOON_SVG)
 
     with ui.tabs().props('dense indicator-color=blue').classes('w-full').style(
             'background:#161b22; border-bottom:1px solid #30363d') as tabs:

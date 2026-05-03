@@ -321,10 +321,14 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
 
     r_max = float(r.max())
     hover_text = [
-        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f}'
+        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f} dB'
          for j in range(gw.shape[1])]
         for i in range(gw.shape[0])
     ]
+
+    _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
+                    title='', showaxeslabels=False, showbackground=False,
+                    showspikes=False)
 
     fig = go.Figure()
     fig.add_trace(go.Surface(
@@ -333,7 +337,7 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
         colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         text=hover_text,
-        hovertemplate='%{text}<extra></extra>',
+        hoverinfo='text',
     ))
     for ax in _xyz_axes(r_max * 1.25):
         fig.add_trace(ax)
@@ -342,12 +346,7 @@ def plot_3d_pattern(R: ProcessedPattern, component: str = 'Total Gain',
         **_3d_layout(),
         title=dict(text=f'3D Pattern — {label}', font=dict(color=_FONT_COLOR)),
         scene=dict(
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                       title='', showaxeslabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                       title='', showaxeslabels=False),
-            zaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                       title='', showaxeslabels=False),
+            xaxis=_no_axis, yaxis=_no_axis, zaxis=_no_axis,
             bgcolor=_BG, aspectmode='data',
         ),
     )
@@ -372,10 +371,14 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
     Z = np.cos(TH)
 
     hover_text = [
-        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f}'
+        [f'θ={TH_deg[i,j]:.1f}°  φ={PH_deg[i,j]:.1f}°  {label}={float(gw[i,j]):.2f} dB'
          for j in range(gw.shape[1])]
         for i in range(gw.shape[0])
     ]
+
+    _no_axis = dict(showgrid=False, zeroline=False, showticklabels=False,
+                    title='', showaxeslabels=False, showbackground=False,
+                    showspikes=False)
 
     fig = go.Figure()
     fig.add_trace(go.Surface(
@@ -384,7 +387,7 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
         colorscale=_COLORSCALE,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         text=hover_text,
-        hovertemplate='%{text}<extra></extra>',
+        hoverinfo='text',
     ))
     for ax in _xyz_axes(1.35):
         fig.add_trace(ax)
@@ -393,12 +396,7 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
         **_3d_layout(),
         title=dict(text=f'3D Spherical — {label}', font=dict(color=_FONT_COLOR)),
         scene=dict(
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                       title='', showaxeslabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                       title='', showaxeslabels=False),
-            zaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                       title='', showaxeslabels=False),
+            xaxis=_no_axis, yaxis=_no_axis, zaxis=_no_axis,
             bgcolor=_BG, aspectmode='cube',
         ),
     )
@@ -406,8 +404,8 @@ def plot_3d_sphere(R: ProcessedPattern, component: str = 'Total Gain',
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Circular (azimuthal equidistant) — phi=0 at top, clockwise
-# x = θ·sin(φ),  y = θ·cos(φ)  →  φ=0 → top,  φ=90 → right  (CW)
+# Circular (azimuthal equidistant) — φ=0 at top, clockwise
+# x = θ·sin(φ),  y = θ·cos(φ)
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
                   cmin: float = None, cmax: float = None) -> go.Figure:
@@ -416,14 +414,13 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
     if cmin is None: cmin = cmax - 50
 
     th_max = float(R.theta_vec.max())
-    N = 400
+    N = 600
 
     xi = np.linspace(-th_max, th_max, N)
     yi = np.linspace(-th_max, th_max, N)
     XI, YI = np.meshgrid(xi, yi)
 
     TH_i = np.sqrt(XI ** 2 + YI ** 2)
-    # CW convention: atan2(x, y) → azimuth from +y (north) going clockwise
     PH_i = np.rad2deg(np.arctan2(XI, YI)) % 360.0
 
     pv, gw = _wrap_phi(R, grid)
@@ -431,19 +428,19 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
         (R.theta_vec, pv), gw,
         method='linear', bounds_error=False, fill_value=np.nan)
 
-    pts  = np.column_stack([TH_i.ravel(), PH_i.ravel()])
-    G_i  = interp(pts).reshape(N, N)
+    pts    = np.column_stack([TH_i.ravel(), PH_i.ravel()])
+    G_i    = interp(pts).reshape(N, N)
     mask_out = TH_i > th_max
     G_i[mask_out] = np.nan
 
-    # customdata: stack theta and phi → shape (N, N, 2)
     th_cd = TH_i.copy(); ph_cd = PH_i.copy()
     th_cd[mask_out] = np.nan; ph_cd[mask_out] = np.nan
-    customdata = np.stack([th_cd, ph_cd], axis=-1)   # (N, N, 2)
+    customdata = np.stack([th_cd, ph_cd], axis=-1)
 
     fig = go.Figure(go.Heatmap(
         x=xi, y=yi, z=G_i,
         zmin=cmin, zmax=cmax, colorscale=_COLORSCALE,
+        zsmooth='best',
         customdata=customdata,
         colorbar=dict(title=label, tickfont=dict(color=_FONT_COLOR)),
         hovertemplate=(
@@ -452,30 +449,85 @@ def plot_circular(R: ProcessedPattern, component: str = 'Total Gain',
         ),
     ))
 
+    # ── Concentric theta rings ────────────────────────────────────────────
     ph_ring = np.linspace(0, 2 * np.pi, 361)
     for thr_ring in [30, 60, 90, 120, 150, 180]:
-        if thr_ring > th_max * 1.01: break
+        if thr_ring > th_max * 1.01:
+            break
         fig.add_trace(go.Scatter(
             x=thr_ring * np.sin(ph_ring), y=thr_ring * np.cos(ph_ring),
             mode='lines', line=dict(color='rgba(255,255,255,0.18)', width=0.8),
             showlegend=False, hoverinfo='skip'))
-        fig.add_annotation(x=0, y=thr_ring + 3, text=f'{thr_ring}°',
-                           showarrow=False,
-                           font=dict(color='rgba(255,255,255,0.55)', size=9))
+        fig.add_annotation(x=thr_ring * 0.07, y=thr_ring + th_max * 0.025,
+                           text=f'{thr_ring}°', showarrow=False,
+                           font=dict(color='rgba(255,255,255,0.50)', size=8))
 
-    for ph_lbl, txt in [(0, 'φ=0°'), (90, 'φ=90°'), (180, 'φ=180°'), (270, 'φ=270°')]:
-        r_lbl = th_max * 1.11
+    # ── Phi tick marks & labels at every 30° ─────────────────────────────
+    tick_inner = th_max * 0.93
+    tick_outer = th_max
+    lbl_r      = th_max * 1.13
+    for ph_deg in range(0, 360, 30):
+        ph_rad = np.deg2rad(ph_deg)
+        sx, sy = np.sin(ph_rad), np.cos(ph_rad)
+        # Radial spoke (faint guide line)
+        fig.add_trace(go.Scatter(
+            x=[0, th_max * sx], y=[0, th_max * sy],
+            mode='lines',
+            line=dict(color='rgba(255,255,255,0.10)', width=0.6),
+            showlegend=False, hoverinfo='skip'))
+        # Tick mark segment at boundary
+        fig.add_trace(go.Scatter(
+            x=[tick_inner * sx, tick_outer * sx],
+            y=[tick_inner * sy, tick_outer * sy],
+            mode='lines',
+            line=dict(color='rgba(255,255,255,0.55)', width=1.2),
+            showlegend=False, hoverinfo='skip'))
+        # Label
         fig.add_annotation(
-            x=r_lbl * np.sin(np.deg2rad(ph_lbl)),
-            y=r_lbl * np.cos(np.deg2rad(ph_lbl)),
-            text=txt, showarrow=False,
+            x=lbl_r * sx, y=lbl_r * sy,
+            text=f'{ph_deg}°', showarrow=False,
             font=dict(color=_FONT_COLOR, size=9))
 
+    # ── Clean circular edge: mask outside the circle with background ──────
+    # Path = reversed circle (CCW, +1 winding) + CW square (-1 winding)
+    # Inside circle: +1 + (-1) = 0 → NOT filled (transparent, shows data)
+    # Between circle and square: 0 + (-1) = -1 → filled with _BG ✓
+    n_circ = 360
+    a_arr  = np.linspace(0, 2 * np.pi, n_circ, endpoint=False)[::-1]  # CCW
+    cx = th_max * np.sin(a_arr)
+    cy = th_max * np.cos(a_arr)
+    circ_path = (f'M {cx[0]:.3f},{cy[0]:.3f} ' +
+                 ' '.join(f'L {cx[k]:.3f},{cy[k]:.3f}' for k in range(1, n_circ)) +
+                 ' Z')
+    SQ = th_max * 2.5
+    sq_path = f'M {SQ},{SQ} L {SQ},{-SQ} L {-SQ},{-SQ} L {-SQ},{SQ} Z'
+    fig.add_shape(
+        type='path',
+        path=circ_path + ' ' + sq_path,
+        fillcolor=_BG,
+        line=dict(color=_BG, width=0),
+        layer='above',
+    )
+    # Thin border ring on top of mask
+    fig.add_shape(
+        type='circle',
+        xref='x', yref='y',
+        x0=-th_max, y0=-th_max, x1=th_max, y1=th_max,
+        line=dict(color='rgba(255,255,255,0.35)', width=1),
+        layer='above',
+    )
+
+    pad = th_max * 1.25
     fig.update_layout(
         **_LAYOUT_BASE,
-        title=dict(text=f'Circular (φ=0 top, CW) — {label}', font=dict(color=_FONT_COLOR)),
-        xaxis=_axis_style(title='θ·sin(φ)  [deg]', scaleanchor='y'),
-        yaxis=_axis_style(title='θ·cos(φ)  [deg]'),
+        title=dict(text=f'Circular — {label}', font=dict(color=_FONT_COLOR)),
+        xaxis=_axis_style(
+            title='', scaleanchor='y',
+            showticklabels=False, showgrid=False, zeroline=False,
+            range=[-pad, pad]),
+        yaxis=_axis_style(
+            title='', showticklabels=False, showgrid=False, zeroline=False,
+            range=[-pad, pad]),
     )
     return fig
 
